@@ -1,7 +1,7 @@
 /*
- * Lobbies: up to eight games meet at one, the lobby's owner (docs/port/README.md, "Lobbies").
+ * Lobbies: up to sixteen games meet at one, the lobby's owner (docs/port/README.md, "Lobbies").
  *
- * The owner's game is the lobby. It keeps eight places, the rules of the matches, who is ready, and a table of the
+ * The owner's game is the lobby. It keeps sixteen places, the rules of the matches, who is ready, and a table of the
  * matches that are on (LOBBY_VERSION 4: several at once, side by side); every member's game talks to it about the
  * lobby, over the socket its match will use (by address, or with a room code: the matchmaking service only tells the
  * members where the owner is, and keeps the code while the owner asks for it). A match has a number, two players and
@@ -21,7 +21,10 @@
  * Packets (types 30 to 40; a release without lobbies ignores them; all words little-endian as in net.c):
  *   HELLO   member -> owner   {LOBBY_VERSION, NET_VERSION, fingerprint mark, low, high, nonce, own public ip, port, name}
  *   NO      owner -> member   {why, nonce}: another version, other game data, the lobby is full
- *   STATE   owner -> member   the whole lobby, every second and at each change (also the owner's heartbeat)
+ *   STATE   owner -> member   the lobby (the places, the rules, the last note, the matches that are on), every second
+ *                             and at each change (also the owner's heartbeat)
+ *   BRACKET owner -> member   the tournament's bracket, with every STATE (a packet of its own since sixteen places:
+ *                             each stays well under a network packet's size)
  *   ALIVE   member -> owner   {id, state seen, ready, last match it was sent to, the match it is in, connected, the match
  *                             whose result it has, the result, its wishes so far, the match it wishes to watch (0 none)},
  *                             every second
@@ -40,12 +43,13 @@
  * (620 bytes), ALIVE the result of the last match this member was in, HELLO a rejoin token (a game of version 2 is told the versions differ).
  * LOBBY_VERSION 4 (docs/port/lobby_v4_plan.md): matches side by side, each watched at its host. STATE has the table of
  * matches after the bracket (688 bytes), GO a key, BACK what it means, ALIVE a wish, WATCHERS is new. A game of
- * version 3 is told the versions differ.
+ * version 3 is told the versions differ. Sixteen places and a bracket of sixteen came with it (step 5 of the plan): STATE
+ * is laid out anew (732 bytes) and the bracket travels in BRACKET (480).
  *
  * Tournaments (docs/port/README.md, "Tournaments"): the owner switches the lobby to Tournament (the first rule) and
- * draws a bracket of those in the player places, of which the Entrants rule makes 2 to 8 (empty ones are left out;
- * the rest of the eight are the spectators'): their order is shuffled from a number the owner draws (the
- * system's random source; sent with the bracket), with byes where the entrants are not 2, 4 or 8. The owner's game
+ * draws a bracket of those in the player places, of which the Entrants rule makes 2 to 16 (empty ones are left out;
+ * the rest of the sixteen are the spectators'): their order is shuffled from a number the owner draws (the
+ * system's random source; sent with the bracket), with byes where the entrants are not 2, 4, 8 or 16. The owner's game
  * holds the bracket and sends it with the lobby (STATE). Each match is a lobby's match, its entrant on the left the
  * host: the owner starts the next one, or every match whose two entrants are known, here and free at once. Every copy
  * in a match notes how its first battle ended (the battle
@@ -77,9 +81,11 @@
  * move <place> <place>, rule <rule> <step>, ready, say <text>, wait <members> (until that many are there),
  * waitmatch (until this copy is in a match), waitlobby (until it is in none and, the owner, none is on), waitmatches
  * <n> (until n matches are on), watch <n> (the n-th match that is on, from 1; 0: stop watching), all (a tournament:
- * every match that can start now, once two can); tournaments: waitready <n> (until n places are ready),
+ * every match that can start now, once two can), autotour (every match begun as soon as it can be, until the
+ * tournament is over); tournaments: waitready <n> (until n places are ready),
  * tour (a tournament drawn), next (its next match started, once it can be), choose <side> (once the owner is asked
- * to choose a match's winner: 0 or 1), waittour (until it is over); BT3_TEST_RESULT_LIE=1: a member reports the other
+ * to choose a match's winner: 0 or 1), waittour (until it is over); BT3_TEST_CONNECT_S=<s>: the time a match's players
+ * have to connect (40 s); BT3_TEST_RESULT_LIE=1: a member reports the other
  * side as the winner. The lobby's
  * changes are written to the log.
  */
@@ -111,7 +117,8 @@ enum { T_L_HELLO = 30, T_L_NO, T_L_STATE, T_L_ALIVE, T_L_GO, T_L_BACK, T_L_LEAVE
        T_L_AVATAR,  /* member -> owner  {its id, its picture's reference (AVB bytes)}: every few seconds while it has one */
        T_L_AVATARS, /* owner -> member  {count, count x (a member's id, its reference)}: the pictures of everyone in the lobby.
                        Both are outside what a copy without pictures knows: it ignores them, and LOBBY_VERSION stays */
-       T_L_WATCHERS /* owner -> a match's host: where its spectators are (version 4) */
+       T_L_WATCHERS, /* owner -> a match's host: where its spectators are (version 4) */
+       T_L_BRACKET  /* owner -> member  the tournament's bracket (version 4) */
      };
 enum { LOBBY_VERSION = 4, /* 2: STATE carries the member's nonce (its greeting's), which a member connecting asks for; 3: tournaments (the bracket in STATE, results in ALIVE, the rejoin token in HELLO, TOKEN); 4: matches side by side, watched at their hosts */ FP_MARK = 0x46505231, LOBBY_CAP = 0x4C4F4231 /* "1BOL": a game's 1v1 greeting says it knows lobbies */ };
 enum { LNO_VERSION = 1, LNO_DATA = 2, LNO_FULL = 3 };
@@ -125,8 +132,26 @@ enum { CLOSE_CLOSED = 1, CLOSE_KICKED = 2 };
 #define MATCH_CONNECT_NS (40 * SEC) /* the two players have not connected to each other in this long: back to the lobby */
 #define RESULT_WAIT_NS (20 * SEC)  /* a tournament's match: one player's result and not the other's this long: played again */
 #define MATCHES LOBBY_MATCHES
-#define TOUR_BYTES 620             /* STATE: the lobby (372 bytes), then the mode and the bracket (tour_put), */
-#define STATE_BYTES (TOUR_BYTES + 4 + MATCHES * 16) /* ... then the matches that are on (matches_put) */
+/* STATE: twelve words (its number, this member's id, the owner's, whether a match is on, the last match's number,
+   the rules in two, the note's number, this member's nonce, the mode and the Entrants rule), then each place's id
+   and ready word, the places' names, the note, the code, and the matches that are on (matches_put). */
+#define ST_PLACES 48
+#define ST_NAMES (ST_PLACES + LOBBY_SLOTS * 8)
+#define ST_NOTE (ST_NAMES + LOBBY_SLOTS * NAMEB)
+#define ST_CODE (ST_NOTE + NOTE)
+#define ST_MATCHES (ST_CODE + 8)
+#define STATE_BYTES (ST_MATCHES + 4 + MATCHES * 16)
+/* BRACKET: eight words (STATE's number, state | size << 8 | count << 16, the tournament's number, the shuffle's
+   seed, the next match | the champion << 8 | the match the owner chooses << 16 (bytes, 0xFF none), who left (a bit
+   each)), then the entrants' ids, their names, and a byte each for the leaves (0xFF a bye), the matches' winners
+   and how, and the seconds left of a held place. */
+#define BK_IDS 32
+#define BK_NAMES (BK_IDS + TOUR * 4)
+#define BK_LEAF (BK_NAMES + TOUR * NAMEB)
+#define BK_WIN (BK_LEAF + TOUR)
+#define BK_HOW (BK_WIN + TOUR)
+#define BK_DROP (BK_HOW + TOUR)
+#define BRACKET_BYTES (BK_DROP + TOUR)
 #define GO_BYTES 64
 #define BACK_BYTES (12 + NOTE + 4)
 #define WATCH_MAX 6                /* a match's spectators at most (net.c: SPEC_MAX, what its host takes) */
@@ -187,7 +212,7 @@ enum { HOW_BYE = 1, HOW_WALKOVER = 2, HOW_PLAYED = 3, HOW_CHOSEN = 4 /* the owne
 typedef struct {
     int state;                 /* 0 none, 1 on, 2 over */
     uint32_t gen, seed;
-    int size, count;           /* leaves (2, 4, 8), entrants */
+    int size, count;           /* leaves (2, 4, 8, 16), entrants */
     uint32_t id[TOUR];         /* the entrants: their members' ids, */
     char name[TOUR][NAMEB];    /* ... names, */
     int gone[TOUR];            /* ... and whether they left */
@@ -262,7 +287,7 @@ static struct {
     int probe;                 /* a member joining a typed address: it also asks as a spectator would (probe_send) */
     uint64_t probeNs;
     uint64_t otherNs;          /* the owner: when someone of another version last tried to join (said once a minute) */
-    uint32_t nonce, seqSeen;
+    uint32_t nonce, seqSeen, bkSeen;
     uint32_t ended[ENDED];     /* the matches it was told are over (a late GO of one is not taken) */
     int endedAt;
     uint32_t wish, wishSeq;    /* the match it asks to watch (0 none), its wishes so far */
@@ -457,7 +482,7 @@ static int t_matches(void) {
 
 static int t_round(int m) { /* the round match m is in (0 the first) */
     int r = 0;
-    while (r < 2 && m >= sL.t.size - (sL.t.size >> (r + 1))) {
+    while (r < 3 && m >= sL.t.size - (sL.t.size >> (r + 1))) {
         r++;
     }
     return r;
@@ -819,7 +844,7 @@ static void table_make(void) { /* the owner's places into the table the window a
 }
 
 static void log_table(void) {
-    char line[512];
+    char line[1024];
     size_t at = 0;
     int s;
     for (s = 0; s < LOBBY_SLOTS; s++) {
@@ -832,68 +857,58 @@ static void log_table(void) {
     fprintf(stderr, "bt3: lobby: places %s; rules %s\n", line, rules_text());
 }
 
-/* The mode and the bracket, in STATE after the lobby (bytes 372 on): words 93 mode | state << 8 | size << 16 |
-   count << 24, 94 the tournament's number, 95 the shuffle's seed, 96 the next match, the champion and the match on
-   (a byte each, 0xFF none) and the Entrants rule, 97..104 the entrants' ids; their names from byte 420 (8 x 20), the leaves from 580 (8
-   bytes, 0xFF a bye), the matches' winners from 588 (7) and how from 595 (7), at 602 who left (a bit each), from 608 the seconds left of a held place (8), at 616 the match whose winner the owner
-   chooses. */
+/* The bracket, into a BRACKET packet (its layout: BK_ above). */
 static void tour_put(uint8_t *p) {
+    uint32_t gone = 0;
     int i;
-    put(p, 93, (uint32_t)sL.mode | (uint32_t)sL.t.state << 8 | (uint32_t)sL.t.size << 16 | (uint32_t)sL.t.count << 24);
-    put(p, 94, sL.t.gen);
-    put(p, 95, sL.t.seed);
-    put(p, 96, (uint32_t)(uint8_t)sL.t.cur | (uint32_t)(uint8_t)sL.t.champ << 8 | 0xFFu << 16 /* (was: the match on; now the table of matches) */ |
-                   (uint32_t)(uint8_t)sL.entrants << 24);
+    put(p, 3, (uint32_t)sL.t.state | (uint32_t)sL.t.size << 8 | (uint32_t)sL.t.count << 16);
+    put(p, 4, sL.t.gen);
+    put(p, 5, sL.t.seed);
+    put(p, 6, (uint32_t)(uint8_t)sL.t.cur | (uint32_t)(uint8_t)sL.t.champ << 8 | (uint32_t)(uint8_t)sL.t.choose << 16);
     for (i = 0; i < TOUR; i++) {
-        put(p, 97 + i, sL.t.id[i]);
-        memcpy(p + 420 + i * NAMEB, sL.t.name[i], NAMEB);
-        p[580 + i] = (uint8_t)sL.t.leaf[i];
-        p[602] |= (uint8_t)(sL.t.gone[i] ? 1 << i : 0);
+        put(p + BK_IDS, i, sL.t.id[i]);
+        memcpy(p + BK_NAMES + i * NAMEB, sL.t.name[i], NAMEB);
+        p[BK_LEAF + i] = (uint8_t)sL.t.leaf[i];
+        p[BK_DROP + i] = (uint8_t)(sL.t.dropSecs[i] < 255 ? sL.t.dropSecs[i] : 255); /* (a held place's seconds left) */
+        gone |= sL.t.gone[i] ? 1u << i : 0;
     }
     for (i = 0; i < TOUR - 1; i++) {
-        p[588 + i] = (uint8_t)sL.t.win[i];
-        p[595 + i] = (uint8_t)sL.t.how[i];
+        p[BK_WIN + i] = (uint8_t)sL.t.win[i];
+        p[BK_HOW + i] = (uint8_t)sL.t.how[i];
     }
-    for (i = 0; i < TOUR; i++) {
-        p[608 + i] = (uint8_t)(sL.t.dropSecs[i] < 255 ? sL.t.dropSecs[i] : 255); /* (a held place's seconds left) */
-    }
-    p[616] = (uint8_t)sL.t.choose; /* (the match whose winner the owner chooses, 0xFF none) */
+    put(p, 7, gone);
 }
 
 static void tour_get(const uint8_t *p) {
-    uint32_t w = get(p, 93), x = get(p, 96);
-    int i, size = (int)(w >> 16 & 0xFF), count = (int)(w >> 24 & 0xFF);
-    sL.mode = (int)(w & 0xFF) == 1;
-    sL.entrants = (int)(x >> 24 & 0xFF) >= 2 && (int)(x >> 24 & 0xFF) <= TOUR ? (int)(x >> 24 & 0xFF) : 2;
-    if (!(size == 2 || size == 4 || size == 8) || count < 2 || count > size) {
+    uint32_t w = get(p, 3), x = get(p, 6), gone = get(p, 7);
+    int i, size = (int)(w >> 8 & 0xFF), count = (int)(w >> 16 & 0xFF), choose = (int)(int8_t)(uint8_t)(x >> 16 & 0xFF);
+    if (!(size == 2 || size == 4 || size == 8 || size == 16) || size > TOUR || count < 2 || count > size) {
         memset(&sL.t, 0, sizeof(sL.t));
         sL.t.cur = sL.t.champ = sL.t.choose = -1;
         return;
     }
-    sL.t.state = (int)(w >> 8 & 0xFF) % 3;
+    sL.t.state = (int)(w & 0xFF) % 3;
     sL.t.size = size;
     sL.t.count = count;
-    sL.t.gen = get(p, 94);
-    sL.t.seed = get(p, 95);
+    sL.t.gen = get(p, 4);
+    sL.t.seed = get(p, 5);
     sL.t.cur = (int)(int8_t)(uint8_t)(x & 0xFF);
     sL.t.champ = (int)(int8_t)(uint8_t)(x >> 8 & 0xFF);
     for (i = 0; i < TOUR; i++) {
-        int leaf = (int)(int8_t)p[580 + i];
-        sL.t.id[i] = get(p, 97 + i);
-        memcpy(sL.t.name[i], p + 420 + i * NAMEB, NAMEB);
+        int leaf = (int)(int8_t)p[BK_LEAF + i];
+        sL.t.id[i] = get(p + BK_IDS, i);
+        memcpy(sL.t.name[i], p + BK_NAMES + i * NAMEB, NAMEB);
         name_clean(sL.t.name[i], NAMEB);
         sL.t.leaf[i] = leaf >= 0 && leaf < count ? leaf : -1;
-        sL.t.gone[i] = p[602] >> i & 1;
+        sL.t.gone[i] = (int)(gone >> i & 1);
+        sL.t.dropSecs[i] = p[BK_DROP + i];
     }
     for (i = 0; i < TOUR - 1; i++) {
-        int win = (int)(int8_t)p[588 + i];
+        int win = (int)(int8_t)p[BK_WIN + i];
         sL.t.win[i] = win >= 0 && win < count ? win : -1;
-        sL.t.how[i] = p[595 + i] <= HOW_CHOSEN ? p[595 + i] : 0;
+        sL.t.how[i] = p[BK_HOW + i] <= HOW_CHOSEN ? p[BK_HOW + i] : 0;
     }
-    for (i = 0; i < TOUR; i++) {
-        sL.t.dropSecs[i] = p[608 + i];
-    }
-    sL.t.choose = (int)(int8_t)p[616] >= 0 && (int)(int8_t)p[616] < size - 1 ? (int)(int8_t)p[616] : -1;
+    sL.t.choose = choose >= 0 && choose < size - 1 ? choose : -1;
     if (sL.t.cur >= size - 1) { sL.t.cur = -1; }
     if (sL.t.champ >= count) { sL.t.champ = -1; }
 }
@@ -904,7 +919,7 @@ static void matches_put(uint8_t *p) {
     int i, n = 0;
     for (i = 0; i < MATCHES; i++) {
         const LMatch *x = &sL.mt[i];
-        uint8_t *q = p + TOUR_BYTES + 4 + n * 16;
+        uint8_t *q = p + ST_MATCHES + 4 + n * 16;
         if (x->gen == 0) {
             continue;
         }
@@ -914,15 +929,15 @@ static void matches_put(uint8_t *p) {
         put(q, 3, x->id[1]);
         n++;
     }
-    put(p + TOUR_BYTES, 0, (uint32_t)n);
+    put(p + ST_MATCHES, 0, (uint32_t)n);
 }
 
 static void matches_get(const uint8_t *p) {
-    uint32_t n = get(p + TOUR_BYTES, 0);
+    uint32_t n = get(p + ST_MATCHES, 0);
     int i;
     memset(sL.mt, 0, sizeof(sL.mt));
     for (i = 0; i < MATCHES && (uint32_t)i < n; i++) {
-        const uint8_t *q = p + TOUR_BYTES + 4 + i * 16;
+        const uint8_t *q = p + ST_MATCHES + 4 + i * 16;
         uint32_t w = get(q, 1);
         int tm = (int)(int8_t)(uint8_t)(w & 0xFF);
         sL.mt[i].gen = get(q, 0);
@@ -999,16 +1014,26 @@ static void state_send(int k) {
     put(p, 7, (uint32_t)sL.battle | (uint32_t)sL.time << 8 | (uint32_t)sL.speed << 16);
     put(p, 8, (uint32_t)sL.roll | (uint32_t)sL.delay << 8);
     put(p, 9, sL.noteSeq);
+    put(p, 10, sL.m[k].nonce); /* (the member's greeting's: how a member connecting knows this is its owner's answer) */
+    put(p, 11, (uint32_t)sL.mode | (uint32_t)sL.entrants << 8);
     for (s = 0; s < LOBBY_SLOTS; s++) {
-        put(p, 10 + s * 2, sL.ids[s]);
-        put(p, 11 + s * 2, (uint32_t)sL.ready[s]);
-        memcpy(p + 104 + s * NAMEB, sL.names[s], NAMEB);
+        put(p + ST_PLACES, s * 2, sL.ids[s]);
+        put(p + ST_PLACES, s * 2 + 1, (uint32_t)sL.ready[s]);
+        memcpy(p + ST_NAMES + s * NAMEB, sL.names[s], NAMEB);
     }
-    memcpy(p + 264, sL.note, NOTE);
-    memcpy(p + 360, sL.code, 8);
-    put(p, 92, sL.m[k].nonce); /* (the member's greeting's: how a member connecting knows this is its owner's answer) */
-    tour_put(p);
+    memcpy(p + ST_NOTE, sL.note, NOTE);
+    memcpy(p + ST_CODE, sL.code, 8);
     matches_put(p);
+    send_to(p, (int)sizeof(p), &sL.m[k].addr);
+}
+
+static void bracket_send(int k) {
+    uint8_t p[BRACKET_BYTES];
+    memset(p, 0, sizeof(p));
+    put(p, 0, MAGIC);
+    put(p, 1, T_L_BRACKET);
+    put(p, 2, sL.seq);
+    tour_put(p);
     send_to(p, (int)sizeof(p), &sL.m[k].addr);
 }
 
@@ -1020,6 +1045,7 @@ static void state_all(void) {
     for (k = 1; k < LOBBY_SLOTS; k++) {
         if (sL.m[k].on) {
             state_send(k);
+            bracket_send(k);
             token_send(k);
         }
     }
@@ -1453,7 +1479,8 @@ static void t_resolve(void) {
 
 /* A tournament of those in the player places (the Entrants rule's), drawn (the owner's TOUR_NEW). */
 static void t_new(void) {
-    static const int kByePairs8[4] = {0, 3, 1, 2}, kByePairs4[2] = {0, 1}; /* (the byes shared out between the halves) */
+    /* (the byes shared out between the halves, and within a half between its quarters) */
+    static const int kByePairs16[8] = {0, 7, 3, 4, 1, 6, 2, 5}, kByePairs8[4] = {0, 3, 1, 2}, kByePairs4[2] = {0, 1};
     int order[TOUR], n = 0, s, i, byes;
     uint32_t x, gen = sL.t.gen;
     if (matches_on() != 0 || sL.mode != 1 || sL.t.state == 1) {
@@ -1481,7 +1508,7 @@ static void t_new(void) {
     sL.t.gen = gen + 1;
     sL.t.state = 1;
     sL.t.count = n;
-    sL.t.size = n <= 2 ? 2 : n <= 4 ? 4 : 8;
+    sL.t.size = n <= 2 ? 2 : n <= 4 ? 4 : n <= 8 ? 8 : 16;
     sL.t.seed = os_random32();
     x = sL.t.seed != 0 ? sL.t.seed : 0x9E3779B9u;
     for (i = n - 1; i > 0; i--) { /* (Fisher-Yates, xorshift32 from the seed) */
@@ -1499,7 +1526,7 @@ static void t_new(void) {
         sL.t.leaf[i] = 0;
     }
     for (i = 0; i < byes; i++) {
-        sL.t.leaf[2 * (sL.t.size == 8 ? kByePairs8[i] : kByePairs4[i]) + 1] = -1;
+        sL.t.leaf[2 * (sL.t.size == 16 ? kByePairs16[i] : sL.t.size == 8 ? kByePairs8[i] : kByePairs4[i]) + 1] = -1;
     }
     for (i = 0, s = 0; i < sL.t.size; i++) {
         if (sL.t.leaf[i] == 0) {
@@ -1583,11 +1610,11 @@ static void result_post(void) {
     int m, n, count = 0;
     SDL_Thread *t;
 
-    if (sL.on != 1 || sL.t.champ < 0 || getenv("BT3_NO_RESULT") != NULL || (json = (char *)SDL_malloc(2048)) == NULL) {
+    if (sL.on != 1 || sL.t.champ < 0 || getenv("BT3_NO_RESULT") != NULL || (json = (char *)SDL_malloc(4096)) == NULL) {
         return;
     }
     json_name(w, sizeof(w), sL.t.name[sL.t.champ]);
-    n = SDL_snprintf(json, 2048, "{\"grp\":\"%s\",\"champion\":\"%s\",\"entrants\":%d,\"matches\":[", PortSquad_MyGroupId(), w, sL.t.count);
+    n = SDL_snprintf(json, 4096, "{\"grp\":\"%s\",\"champion\":\"%s\",\"entrants\":%d,\"matches\":[", PortSquad_MyGroupId(), w, sL.t.count);
     for (m = 0; m < t_matches(); m++) {
         int ea = t_part(m, 0), eb = t_part(m, 1);
         if (ea < 0 || eb < 0 || sL.t.win[m] < 0 || sL.t.how[m] == HOW_BYE) {
@@ -1595,9 +1622,9 @@ static void result_post(void) {
         }
         json_name(a, sizeof(a), sL.t.name[ea]);
         json_name(b, sizeof(b), sL.t.name[eb]);
-        n += SDL_snprintf(json + n, 2048 - (size_t)n, "%s{\"a\":\"%s\",\"b\":\"%s\",\"w\":\"%s\"}", count++ ? "," : "", a, b, sL.t.win[m] == ea ? a : b);
+        n += SDL_snprintf(json + n, 4096 - (size_t)n, "%s{\"a\":\"%s\",\"b\":\"%s\",\"w\":\"%s\"}", count++ ? "," : "", a, b, sL.t.win[m] == ea ? a : b);
     }
-    SDL_snprintf(json + n, 2048 - (size_t)n, "]}");
+    SDL_snprintf(json + n, 4096 - (size_t)n, "]}");
     t = count > 0 ? SDL_CreateThread(result_thread, "bt3-result", json) : NULL;
     if (t != NULL) {
         SDL_DetachThread(t);
@@ -2365,7 +2392,7 @@ static void alive_send(void) {
 
 static const char *no_text(uint32_t why) {
     return why == LNO_DATA ? "The lobby owner's game data are not the same as yours (a modified disc image or mods on one side): you cannot join."
-         : why == LNO_FULL ? "This lobby is full (8 places)."
+         : why == LNO_FULL ? "This lobby is full (16 places)."
                           : "The lobby owner's game is a different version: joining needs the same release.";
 }
 
@@ -2418,8 +2445,8 @@ static void member_packet(const uint8_t *pkt, int n, const struct sockaddr_in *f
         int ours = 0;
         if (type == T_L_NO && n >= 16) {
             ours = get(pkt, 3) == sL.nonce;
-        } else if (type == T_L_STATE && n >= 372) {
-            ours = get(pkt, 92) == sL.nonce;
+        } else if (type == T_L_STATE && n >= STATE_BYTES) {
+            ours = get(pkt, 10) == sL.nonce;
         }
         if (!ours) {
             static int said;
@@ -2472,34 +2499,30 @@ static void member_packet(const uint8_t *pkt, int n, const struct sockaddr_in *f
         sL.roll = (int)(o & 0xFF);
         sL.delay = (int)(o >> 8 & 0xFF);
         for (s = 0; s < LOBBY_SLOTS; s++) {
-            uint32_t id = get(pkt, 10 + s * 2);
-            changed |= id != sL.ids[s] || sL.ready[s] != (int)get(pkt, 11 + s * 2);
+            uint32_t id = get(pkt + ST_PLACES, s * 2);
+            changed |= id != sL.ids[s] || sL.ready[s] != (int)get(pkt + ST_PLACES, s * 2 + 1);
             sL.ids[s] = id;
-            sL.ready[s] = (int)get(pkt, 11 + s * 2);
-            memcpy(sL.names[s], pkt + 104 + s * NAMEB, NAMEB);
+            sL.ready[s] = (int)get(pkt + ST_PLACES, s * 2 + 1);
+            memcpy(sL.names[s], pkt + ST_NAMES + s * NAMEB, NAMEB);
             name_clean(sL.names[s], NAMEB);
         }
         if (noteSeq != sL.noteSeq) {
             sL.noteSeq = noteSeq;
-            memcpy(sL.note, pkt + 264, NOTE);
+            memcpy(sL.note, pkt + ST_NOTE, NOTE);
             name_clean(sL.note, NOTE);
             if (sL.note[0] != '\0') {
                 log_push("", sL.note);
             }
             fprintf(stderr, "bt3: lobby: note: %s\n", sL.note);
         }
-        memcpy(sL.code, pkt + 360, 8);
+        memcpy(sL.code, pkt + ST_CODE, 8);
         sL.code[7] = '\0';
         {
-            uint32_t was = sL.t.gen;
-            int wasState = sL.t.state, wasChamp = sL.t.champ, wasMode = sL.mode, wasEntrants = sL.entrants;
-            tour_get(pkt);
-            changed |= sL.mode != wasMode || sL.entrants != wasEntrants;
-            if (sL.t.size >= 2 && (sL.t.gen != was || sL.t.state != wasState || sL.t.champ != wasChamp)) {
-                fprintf(stderr, "bt3: lobby: tournament %u: %s, %d entrants, bracket of %d%s%s\n", (unsigned)sL.t.gen,
-                        sL.t.state == 1 ? "on" : sL.t.state == 2 ? "over" : "called off", sL.t.count, sL.t.size,
-                        sL.t.champ >= 0 ? ", champion " : "", sL.t.champ >= 0 ? sL.t.name[sL.t.champ] : "");
-            }
+            uint32_t w = get(pkt, 11);
+            int mode = (int)(w & 0xFF) == 1, entrants = (int)(w >> 8 & 0xFF) >= 2 && (int)(w >> 8 & 0xFF) <= TOUR ? (int)(w >> 8 & 0xFF) : 2;
+            changed |= sL.mode != mode || sL.entrants != entrants;
+            sL.mode = mode;
+            sL.entrants = entrants;
         }
         if (changed) {
             log_table();
@@ -2511,6 +2534,19 @@ static void member_packet(const uint8_t *pkt, int n, const struct sockaddr_in *f
             if (me < LOBBY_SLOTS && sL.ready[me] == sL.wantReady) {
                 sL.wantReady = -1;
             }
+        }
+    } else if (type == T_L_BRACKET && n >= BRACKET_BYTES) {
+        uint32_t seq = get(pkt, 2), was = sL.t.gen;
+        int wasState = sL.t.state, wasChamp = sL.t.champ;
+        if (seq < sL.bkSeen && sL.bkSeen - seq < 1000) {
+            return; /* (an old one, overtaken) */
+        }
+        sL.bkSeen = seq;
+        tour_get(pkt);
+        if (sL.t.size >= 2 && (sL.t.gen != was || sL.t.state != wasState || sL.t.champ != wasChamp)) {
+            fprintf(stderr, "bt3: lobby: tournament %u: %s, %d entrants, bracket of %d%s%s\n", (unsigned)sL.t.gen,
+                    sL.t.state == 1 ? "on" : sL.t.state == 2 ? "over" : "called off", sL.t.count, sL.t.size,
+                    sL.t.champ >= 0 ? ", champion " : "", sL.t.champ >= 0 ? sL.t.name[sL.t.champ] : "");
         }
     } else if (type == T_L_GO && n >= GO_BYTES) {
         uint32_t gen = get(pkt, 2);
@@ -2720,6 +2756,13 @@ static void result_watch(uint32_t gen) {
     }
 }
 
+/* How long a match's two players have to connect and reach the character select. BT3_TEST_CONNECT_S=<seconds>: tests
+   with many copies on one machine, whose start-ups share its processors. */
+static uint64_t connect_ns(void) {
+    const char *e = getenv("BT3_TEST_CONNECT_S");
+    return e != NULL && atoi(e) > 0 ? (uint64_t)atoi(e) * SEC : MATCH_CONNECT_NS;
+}
+
 /* Timers of both, with the session or without. */
 static void timers(void) {
     uint64_t now = now_ns();
@@ -2851,7 +2894,7 @@ static void timers(void) {
                 continue;
             }
             t_decide(x);
-            if (x->gen != 0 && now > x->goNs && now - x->goNs > MATCH_CONNECT_NS) {
+            if (x->gen != 0 && now > x->goNs && now - x->goNs > connect_ns()) {
                 int a = x->k[0], b = x->k[1];
                 int ok = (a == 0 ? sL.inGen == x->gen && NetIo_Connected() : sL.m[a].inGen == x->gen && sL.m[a].connected) &&
                          (b == 0 ? sL.inGen == x->gen && NetIo_Connected() : sL.m[b].inGen == x->gen && sL.m[b].connected);
@@ -3272,6 +3315,15 @@ static void script(void) {
             done = sL.on == 1 && t_can_start(sL.t.cur);
             if (done) {
                 owner_do(LOBBY_START, 0, 0);
+            }
+        } else if (strncmp(c, "autotour", 8) == 0) { /* every match begun as soon as it can be, until the tournament is over */
+            int m, can = 0;
+            done = sL.t.state == 2 && matches_on() == 0 && NetIo_SessionMode() == 0 && !NetIo_SessionStarting();
+            for (m = 0; !done && sL.on == 1 && sL.t.state == 1 && m < t_matches(); m++) {
+                can += t_can_start(m);
+            }
+            if (can > 0) {
+                owner_do(LOBBY_TOUR_START, -1, 0);
             }
         } else if (strncmp(c, "all", 3) == 0) { /* every match that can start, once two can: side by side */
             int m, can = 0;

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-enum { T_LOBBY_FIRST = 30, T_LOBBY_LAST = 44 }; /* the lobby's packet types (net_lobby.c); a release without lobbies ignores them */
+enum { T_LOBBY_FIRST = 30, T_LOBBY_LAST = 45 }; /* the lobby's packet types (net_lobby.c); a release without lobbies ignores them */
 
 #ifndef __cplusplus
 struct sockaddr_in;
@@ -62,16 +62,16 @@ void Lobby_Stranger(const uint8_t *pkt, int n, const struct sockaddr_in *from, u
 #endif
 
 /* ---- the window (ui.cpp) ---- */
-#define LOBBY_SLOTS 8
+#define LOBBY_SLOTS 16
 #define LOBBY_NAME 20
 #define LOBBY_CHAT 32
 #define LOBBY_LOG 6
-#define LOBBY_TOUR 8 /* a tournament's entrants at most (the bracket's leaves) */
+#define LOBBY_TOUR 16 /* a tournament's entrants at most (the bracket's leaves) */
 #define LOBBY_MATCHES (LOBBY_TOUR / 2) /* matches on at the same time at most (a first round's) */
 typedef struct PortLobbyView {
     int state;                  /* 0 none, 1 connecting, 2 in the lobby, 3 closed (error says why; Port_LobbyDo(LOBBY_OK) clears it) */
     int owner;                  /* this copy owns the lobby */
-    int me;                     /* this copy's place (0, 1 the players, 2..7 the spectators), -1 none yet */
+    int me;                     /* this copy's place (0, 1 the players, the others the spectators), -1 none yet */
     int phase;                  /* 0 no match is on, 1 at least one is (matchCount) */
     int inMatch;                /* this copy is in a match (playing or watching: myMatch) */
     char code[8];               /* the room code ("" none, or not yet) */
@@ -99,8 +99,8 @@ typedef struct PortLobbyView {
     int mode;                   /* 0 versus, 1 tournament (the first rule) */
     int tour;                   /* 0 no bracket, 1 a tournament is on, 2 it is over (tourChamp) */
     unsigned tourGen;           /* the tournaments drawn so far (a new one: it changed) */
-    int tourSize;               /* the bracket's leaves: 2, 4 or 8 */
-    int tourCount;              /* its entrants, 2..8 */
+    int tourSize;               /* the bracket's leaves: 2, 4, 8 or 16 */
+    int tourCount;              /* its entrants, 2..16 */
     char tourName[LOBBY_TOUR][LOBBY_NAME];
     int tourGone[LOBBY_TOUR];   /* the entrant left the lobby (its matches are lost by walkover) */
     int tourDrop[LOBBY_TOUR];   /* its game fell silent: the seconds left that its place is held (a rejoin), 0 none */
@@ -119,7 +119,7 @@ typedef struct PortLobbyView {
     char avatar[LOBBY_SLOTS][64];
     char tourAvatar[LOBBY_TOUR][64];
     int readyCount;             /* places marked ready */
-    int entrants;               /* the player places: 2 (versus: 1P, 2P), a tournament's Entrants rule 2..8 */
+    int entrants;               /* the player places: 2 (versus: 1P, 2P), a tournament's Entrants rule 2..16 */
     int entrantCount;           /* of them taken (a tournament started now has these) */
     /* the matches that are on, side by side (a versus lobby has one at most): each has a number, its two players
        (the first hosts it, and its spectators watch it there) and, in a tournament, the bracket's match it is */

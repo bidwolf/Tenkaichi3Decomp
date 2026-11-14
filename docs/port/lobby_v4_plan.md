@@ -11,16 +11,19 @@ is watched at its host (the player on the left), with a key the owner draws; mat
 side; anyone not playing chooses the match to watch, changes it, or stays on the lobby's page. What it is and how
 it was tried: docs/port/README.md, "Lobbies, version 4".
 
-**Not built**: more than eight places (step 5: STATE in parts, the screens for sixteen), more than six spectators a
-match (step 6), a list of the matches on the lobby's page (it has one Watch Match button, for the first that is on;
-the bracket's button chooses).
+**Built, tried less** (step 5): sixteen places and a bracket of sixteen; the state travels as two packets (STATE,
+BRACKET); the lobby's page shows eight places at a time. A tournament of ten ran seven of its nine matches on one
+Mac before the test's time ran out.
+
+**Not built**: more than six spectators a match (step 6), a list of the matches on the lobby's page (it has one
+Watch Match button, for the first that is on; the bracket's button chooses).
 
 **Not tried**: two machines, routers (a match's host must be reachable by its spectators: the owner tells the host
 where they are and it knocks at them; behind routers this has never run), the relay with a member as host, Windows
 and Linux, a person with a controller, the pages by pad, a rejoin (a held place) while other matches are on.
 
-**The open questions** were answered by default, to be changed if the user says otherwise: eight still (sixteen is
-step 5); side by side is the owner's choice (Start Next Match starts one, Start All Matches all that can begin);
+**The open questions** were answered by default, to be changed if the user says otherwise: sixteen (not
+thirty-two); side by side is the owner's choice (Start Next Match starts one, Start All Matches all that can begin);
 a versus lobby has one match at a time.
 
 What follows is the plan as it was written before the work. Where it says how the code works, that was version 3's

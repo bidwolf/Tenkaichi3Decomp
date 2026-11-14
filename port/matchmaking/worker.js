@@ -118,7 +118,8 @@ const REGIONS = ["NA", "SA", "EU", "ME", "AF", "AS", "OC"];
 const MIDDLE_EAST = ["AE", "BH", "CY", "EG", "IL", "IQ", "IR", "JO", "KW", "LB", "OM", "PS", "QA", "SA", "SY", "TR", "YE"];
 const QUEUES = ["S", "T", "D10", "D15", "D20"];
 const WATCH_SECONDS = 120;      // a spectator's addresses are handed to the host for this long after it asked
-const WATCHERS_PER_ROOM = 12;   // spectators' requests one room takes in that time (the game takes six at a time)
+const WATCHERS_PER_ROOM = 20;   // spectators' requests one room takes in that time (the game takes six at a time;
+                                // a lobby's members come this way too: sixteen places)
 const RELAY_PER_DAY_ADDRESS = 10; // relay logins one address may be given in a day
 const RELAY_PER_DAY = 500;      // relay logins given in a day, all told (the variable TURN_DAILY_MAX overrides it): the
                                 // ceiling on what the relay can be made to cost, whatever anyone sends

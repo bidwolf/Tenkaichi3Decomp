@@ -2,7 +2,7 @@
   "schema_version": 1,
   "labels_version": 1,
   "translation_version": 1,
-  "labels_count": 540,
+  "labels_count": 541,
   "locale": "pt",
   "name": "Português (Onfly)",
   "order": 2,
@@ -1702,9 +1702,9 @@
       "text": "A conexão com o gestor caiu: a sala foi fechada.",
       "note": "a line of the lobby: what happened, or why it closed (talk box or a window)"
     },
-    "tbo/cfe30adb": {
-      "original": "This lobby is full (8 places).",
-      "text": "Esta sala está lotada (8 assentos).",
+    "tbo/abde6c32": {
+      "original": "This lobby is full (16 places).",
+      "text": "Esta sala está lotada (16 assentos).",
       "note": "a line of the lobby: what happened, or why it closed (talk box or a window)"
     },
     "tbo/db43c724": {
@@ -2047,6 +2047,11 @@
       "text": "COPIADO: COLE O ENDEREÇO PARA OS OUTROS",
       "note": "in Tb_LobbyUpdate"
     },
+    "tbo/a42cb0d8": {
+      "original": "SPECTATORS  %d / %d",
+      "text": "LISTA DE ESPERA  %d / %d",
+      "note": "the lobby's page (its places, code, rules and buttons); keep the %d / %02d parts, in this order (and %% for a % sign)"
+    },
     "tbo/b2da602e": {
       "original": "PLAYERS  %d / %d",
       "text": "VIAJANTES  %d / %d",
@@ -2056,11 +2061,6 @@
       "original": "PLAYERS",
       "text": "VIAJANTES",
       "note": "the lobby's page (its places, code, rules and buttons)"
-    },
-    "tbo/a42cb0d8": {
-      "original": "SPECTATORS  %d / %d",
-      "text": "LISTA DE ESPERA  %d / %d",
-      "note": "the lobby's page (its places, code, rules and buttons); keep the %d / %02d parts, in this order (and %% for a % sign)"
     },
     "tbo/955f9554": {
       "original": "%dP",
@@ -2275,6 +2275,11 @@
     "tbo/62b8644d": {
       "original": "Quarterfinal",
       "text": "Quartas de final",
+      "note": "a round of a tournament, after \"Next: A vs B\" in brackets"
+    },
+    "tbo/f1283003": {
+      "original": "Round of 16",
+      "text": "Oitavas de final",
       "note": "a round of a tournament, after \"Next: A vs B\" in brackets"
     },
     "tbo/77597ab3": {

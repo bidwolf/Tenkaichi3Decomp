@@ -121,7 +121,7 @@ PT = {
     "The lobby was closed by its owner.": "A sala foi fechada pelo gestor.",
     "The lobby's owner removed you from the lobby.": "O gestor cancelou sua reserva na sala.",
     "The connection to the lobby's owner was lost: the lobby is closed.": "A conexão com o gestor caiu: a sala foi fechada.",
-    "This lobby is full (8 places).": "Esta sala está lotada (8 assentos).",
+    "This lobby is full (16 places).": "Esta sala está lotada (16 assentos).",
     "The lobby owner's game is a different version: joining needs the same release.":
         "O jogo do gestor é de outra versão: o check-in exige a mesma versão.",
     "The game at that address is a different version: joining needs the same release.":
@@ -194,7 +194,7 @@ PT = {
     "A MATCH IS ON": "LUTA EM CURSO", "TOURNAMENT ON": "RINHA EM CURSO", "TOURNAMENT OVER": "RINHA ENCERRADA",
     # matches side by side, watching any of them (lobby version 4)
     "MATCHES ARE ON": "LUTAS EM CURSO", "Start All Matches": "Decolar Todas", "Watch Match": "Assistir à Luta",
-    "Watch: %s - %s": "Assistir: %s - %s", "Watch: ": "Assistir: ", "End the Match": "Encerrar a Luta",
+    "Watch: %s - %s": "Assistir: %s - %s", "Round of 16": "Oitavas de final", "Watch: ": "Assistir: ", "End the Match": "Encerrar a Luta",
     "RULES": "POLÍTICA", "RULES (THE OWNER'S)": "POLÍTICA (DO GESTOR)",
     "Opening the Lobby": "Abrindo a Sala", "Joining the Lobby": "Fazendo Check-in",
     "Looking for the lobby's owner...": "Procurando o gestor da sala...", "Opening the port...": "Abrindo a porta...",

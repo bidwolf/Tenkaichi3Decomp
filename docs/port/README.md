@@ -4994,3 +4994,33 @@ presses with `BT3_NET_SCRIPT`, 60 s battles, rollback 8):
 **Not tried**: two machines and anything behind a router (a host reached by its spectators), the relay, Windows and
 Linux (not compiled there), the pages driven by a pad (the lobby page's Watch Match, the spectator's new menu
 lines), a rejoin while other matches are on, a version 3 game knocking.
+
+### Sixteen places, a bracket of sixteen (2026-11-14)
+
+Step 5 of the plan, on top of the above (the same LOBBY_VERSION 4: no release has had either).
+
+- **Sizes**: `LOBBY_SLOTS` and `LOBBY_TOUR` are 16, `LOBBY_MATCHES` 8. The Entrants rule goes from 2 to 16; a bracket
+  has 2, 4, 8 or 16 leaves (`kByePairs16` shares the byes out; `t_round` knows four rounds).
+- **Two packets in place of one**: STATE (732 bytes: the places, the rules, the note, the code, the matches that are
+  on; its layout is the `ST_` offsets) and BRACKET (type 45, 480 bytes, the `BK_` offsets), both with every state.
+  The mode and the Entrants rule moved into STATE's words; the member's nonce is its word 10.
+- **The screens**: the lobby's page shows eight places at a time and follows the cursor ("9-16 / 16" beside the
+  heading; the spectators' heading moves to the top when only they are in view); the bracket page draws sixteen
+  leaves eight a side with lower boxes and smaller names, and names the first round "Round of 16".
+- **The service**: `worker.js` takes twenty members joining a room in two minutes (it took twelve). Not deployed:
+  until it is, a thirteenth member joining by code within two minutes is told to try again soon.
+- **A match's spectators are still six** (step 6 is not done): with sixteen in a lobby and one match on, those past
+  the sixth are left on the lobby's page.
+- **Testing switches**: `BT3_LOBBY_DO` `autotour` (every match begun as soon as it can be, until the tournament is
+  over), `BT3_TEST_CONNECT_S=<s>` (the time a match's players have to connect, 40 s: ten copies on one machine need
+  more).
+
+**Tried** (as above; ten copies on one Mac, `BT3_TEST_CONNECT_S=150`): owner + 9, a tournament of ten in a bracket of
+sixteen (six byes), `autotour`: up to four matches on at once, seven matches decided and the bracket advanced each
+time, no check value of a spectator differed; the run's ten minutes ended during the semifinals, so **the final and
+the champion of a bracket of sixteen were not reached**. One match was begun again by itself: its host gave up on a
+joiner that was slow to answer (the machine was loaded: a start-up took 43 s instead of 10), the lobby said "played
+again" and the second try connected.
+
+**Not tried**: more than ten copies, a full bracket of sixteen, eight matches at once, the lobby's page scrolled by a
+pad, everything listed as not tried above.
