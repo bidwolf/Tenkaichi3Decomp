@@ -1,8 +1,9 @@
 /* A spectator's own pause menu (START or Esc while watching a fight): the battle's own pause menu, drawn by its own
    engine (src/battle/hud_0_b.c, BtlMenu_Draw: the box from the battle's sprite sheet, the items in its font and
    colours, the box growing and shrinking over six frames, the yes / no box before leaving) with a menu of ours:
-   a note, Continue, View (left / right), Back to the Lobby (the lobby's owner) and Leave / Close the Lobby or Stop
-   Watching. Only on this screen: the fight goes on behind it, and nothing of the battle's own menus is touched (the
+   a note, Continue, View (left / right), in a lobby Watch (another match that is on: left / right choose it), Back to
+   the Lobby (this copy alone stops watching) and End the Match (the lobby's owner: for everyone in it), and Leave /
+   Close the Lobby or Stop Watching. Only on this screen: the fight goes on behind it, and nothing of the battle's own menus is touched (the
    engine's update is not run: this file moves the cursor and the box itself; its texts come to the engine through
    BtlMenu_GetItemText, hud_0_b.c, for the numbers PORT_SPEC_TEXT and on).
 
@@ -33,13 +34,16 @@ extern void PortA11y_Say(const char *text, int flags);
 extern volatile int gPortSpecMenuAsk;
 
 #define PORT_SPEC_TEXT 0x7000 /* an item's text number from here on is one of ours (hud_0_b.c) */
-enum { IT_NOTE, IT_CONTINUE, IT_VIEW, IT_BACK, IT_LEAVE, IT_YES, IT_NO };
+enum { IT_NOTE, IT_CONTINUE, IT_VIEW, IT_OTHER, IT_STOP, IT_BACK, IT_LEAVE, IT_YES, IT_NO };
+enum { TEXT_NOTE = 7, TEXT_LOBBY = 8, TEXT_YES = 9, TEXT_NO = 10, TEXTS = 11 }; /* (the items' own: 0 .. 6) */
 
-static BtlMenuItem sItem[5], sSureItem[3];
+static BtlMenuItem sItem[7], sSureItem[3];
 static int sYes = 0; /* the yes / no box's Yes (No is the next) */
 static BtlMenu sMain, sSure;
-static int sKind[5], sCount, sOpen, sClosing, sLeaveAfter, sBackAfter, sSaid = -1;
-static u16 sText[9][96]; /* (8: a lobby's "Back to the Lobby" in the players' menus) */
+static int sKind[7], sCount, sOpen, sClosing, sLeaveAfter, sBackAfter, sStopAfter, sSaid = -1;
+static unsigned sOtherAfter; /* the match to watch instead, once the menu has closed (0 none) */
+static int sOther;           /* which of the other matches the Watch line names */
+static u16 sText[TEXTS][96]; /* (TEXT_LOBBY: a lobby's "Back to the Lobby" in the players' menus) */
 static PortLobbyView sView;
 static unsigned sHeld;
 static int sRepeat;
@@ -71,6 +75,25 @@ static const char *leave_name(void) {
     return "Leave the Lobby";
 }
 
+/* The other matches that are on (not the one being watched): how many, and the n-th of them in the view (-1 none). */
+static int other_count(void) {
+    int i, n = 0;
+    for (i = 0; sView.state == 2 && i < sView.matchCount; i++) {
+        n += sView.matchGen[i] != sView.myMatch;
+    }
+    return n;
+}
+
+static int other_at(int n) {
+    int i;
+    for (i = 0; sView.state == 2 && i < sView.matchCount; i++) {
+        if (sView.matchGen[i] != sView.myMatch && n-- == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 /* An item's line, in the chosen language. */
 static void item_line(int kind, char *out, int size) {
     char a[96], b[64];
@@ -87,8 +110,22 @@ static void item_line(int kind, char *out, int size) {
         out[size - 1] = 0;
         strncat(out, tr(view_name(Port_NetSpecView() % 3), b, sizeof(b)), (size_t)size - strlen(out) - 1);
         break;
-    case IT_BACK:
+    case IT_OTHER: { /* (the two names: not translated) */
+        int at = other_at(sOther);
+        strncpy(out, tr("Watch: ", a, sizeof(a)), (size_t)size - 1);
+        out[size - 1] = 0;
+        if (at >= 0) {
+            strncat(out, sView.matchName[at][0], (size_t)size - strlen(out) - 1);
+            strncat(out, " - ", (size_t)size - strlen(out) - 1);
+            strncat(out, sView.matchName[at][1], (size_t)size - strlen(out) - 1);
+        }
+        break;
+    }
+    case IT_STOP:
         strncpy(out, tr("Back to the Lobby", a, sizeof(a)), (size_t)size - 1);
+        break;
+    case IT_BACK:
+        strncpy(out, tr("End the Match", a, sizeof(a)), (size_t)size - 1);
         break;
     case IT_LEAVE:
         strncpy(out, tr(leave_name(), a, sizeof(a)), (size_t)size - 1);
@@ -122,12 +159,12 @@ static void put_text(u16 *dst, int cap, const char *s) {
 
 /* The engine asks for our item k's text (hud_0_b.c, BtlMenu_GetItemText). */
 u16 *PortSpecMenu_Text(s32 k) {
-    if (k == 8) { /* a lobby's match: the owner's way back in the players' pause and result menus (src/battle/hud_0.c) */
+    if (k == TEXT_LOBBY) { /* a lobby's match: the owner's way back in the players' pause and result menus (src/battle/hud_0.c) */
         char line[96];
-        item_line(IT_BACK, line, sizeof(line));
-        put_text(sText[8], 96, line);
+        item_line(IT_STOP, line, sizeof(line));
+        put_text(sText[TEXT_LOBBY], 96, line);
     }
-    if (k < 0 || k >= 9) {
+    if (k < 0 || k >= TEXTS) {
         k = 0;
     }
     return sText[k];
@@ -141,7 +178,7 @@ static void item_set(BtlMenuItem *item, int slot, int kind, int disabled) {
     item->type = BTL_MENU_ITEM_RESULT;
     item->disabled = disabled;
     item_line(kind, line, sizeof(line));
-    put_text(sText[kind == IT_NOTE ? 7 : slot], 96, line);
+    put_text(sText[kind == IT_NOTE ? TEXT_NOTE : slot], 96, line);
 }
 
 /* The menus as they are now (the view's name changes; the owner gets Back to the Lobby). The box's look (scale,
@@ -152,6 +189,15 @@ static void menus_make(void) {
     sKind[sCount++] = IT_NOTE;
     sKind[sCount++] = IT_CONTINUE;
     sKind[sCount++] = IT_VIEW;
+    if (other_count() > 0) {
+        if (sOther >= other_count()) {
+            sOther = 0;
+        }
+        sKind[sCount++] = IT_OTHER;
+    }
+    if (sView.state == 2) {
+        sKind[sCount++] = IT_STOP;
+    }
     if (sView.state == 2 && sView.owner) {
         sKind[sCount++] = IT_BACK;
     }
@@ -173,8 +219,8 @@ static void menus_make(void) {
             sSure.count = 3;
             sYes = 1;
         } else {
-            item_set(&sSureItem[0], 5, IT_YES, 0);
-            item_set(&sSureItem[1], 6, IT_NO, 0);
+            item_set(&sSureItem[0], TEXT_YES, IT_YES, 0);
+            item_set(&sSureItem[1], TEXT_NO, IT_NO, 0);
             sSure.count = 2;
             sYes = 0;
         }
@@ -347,7 +393,8 @@ static int frame(int vsyncs) {
         }
         sOpen = 1;
         sClosing = 0;
-        sLeaveAfter = sBackAfter = 0;
+        sLeaveAfter = sBackAfter = sStopAfter = 0;
+        sOtherAfter = 0;
         sMain.cursor = 1;
         sMain.open = -1;
         menus_make();
@@ -362,6 +409,9 @@ static int frame(int vsyncs) {
             sSaid = -1;
             if (sBackAfter) {
                 Port_LobbyDo(LOBBY_BACK, 0, 0);
+            }
+            if (sStopAfter || sOtherAfter != 0) { /* (this copy alone: to the lobby's page, or to the other match) */
+                Port_LobbyDo(LOBBY_WATCH, (int)sOtherAfter, 0);
             }
             if (sLeaveAfter) {
                 if (sView.state == 2) {
@@ -401,6 +451,9 @@ static int frame(int vsyncs) {
     } else if ((p & (B_LEFT | B_RIGHT)) && sKind[sMain.cursor] == IT_VIEW) {
         Port_NetSpecViewSet((Port_NetSpecView() + ((p & B_RIGHT) ? 1 : 2)) % 3);
         Snd_PlaySe(1, 0);
+    } else if ((p & (B_LEFT | B_RIGHT)) && sKind[sMain.cursor] == IT_OTHER && other_count() > 1) {
+        sOther = (sOther + ((p & B_RIGHT) ? 1 : other_count() - 1)) % other_count();
+        Snd_PlaySe(1, 0);
     } else if (p & B_CROSS) {
         switch (sKind[sMain.cursor]) {
         case IT_CONTINUE:
@@ -410,6 +463,18 @@ static int frame(int vsyncs) {
         case IT_VIEW:
             Port_NetSpecViewSet((Port_NetSpecView() + 1) % 3);
             Snd_PlaySe(1, 0);
+            break;
+        case IT_OTHER:
+            if (other_at(sOther) >= 0) {
+                Snd_PlaySe(1, 1);
+                sOtherAfter = sView.matchGen[other_at(sOther)];
+                close_menu();
+            }
+            break;
+        case IT_STOP:
+            Snd_PlaySe(1, 1);
+            sStopAfter = 1;
+            close_menu();
             break;
         case IT_BACK:
             Snd_PlaySe(1, 1);

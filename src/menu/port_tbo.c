@@ -606,7 +606,7 @@ static void Tb_BlockUpdate(s32 live) {
 /* What a button means, by its label (the English one, before it is translated): PS_MEAN_YES for one that confirms
    or starts, PS_MEAN_NO for one that deletes, removes, closes or leaves, 0 for the others (include/menu/port_screen.h). */
 static s32 Tb_Mean(const char *label) {
-    static const char *const yes[] = {"OK", "DONE", "JOIN", "Send", "Start Match", "Start Tournament", "Start Next Match",
+    static const char *const yes[] = {"OK", "DONE", "JOIN", "Send", "Start Match", "Start Tournament", "Start Next Match", "Start All Matches",
                                       "New Tournament", "Ready", "Search", "Start Training", "Enter", "Next"};
     static const char *const no[] = {"DELETE", "Delete", "Remove from the Lobby", "Close Lobby", "Leave Lobby", "Cancel",
                                      "Stop Watching", "Close the Lobby", "Leave the Lobby"};
@@ -2039,14 +2039,14 @@ static void Tb_DrawProfileText(void) {
 
 /* ---------------------------------------------------------------------------------------------- the lobby */
 #define TB_BOX_LINE 224 /* (a line of the box, in the game's 16-bit letters) */
-/* A lobby of up to eight (port/src/gs/net_lobby.c; docs/port/README.md, "Lobbies"): the owner's game keeps it, this
+/* A lobby of up to sixteen (port/src/gs/net_lobby.c; docs/port/README.md, "Lobbies"): the owner's game keeps it, this
    page shows the copy every member has (Port_LobbyView) and leaves its wishes with Port_LobbyDo. On the left the
-   eight places (1P and 2P play, the six others watch), on the right the code, the rules and the buttons; the box at
+   places (1P and 2P play, the others watch), eight of them at a time (the list follows the cursor), on the right the code, the rules and the buttons; the box at
    the foot of the screen has what happened last (who came and went, the matches, the chat). The owner moves people
    (a name, Move, then the place: the two swap), removes them, and changes the rules with left / right. When the
    owner starts a match every copy goes into it from here, and comes back here when it ends (the game is put back to
    this moment: gs/state.c). */
-#define LB_ROWS 8
+#define LB_ROWS 8 /* the places shown at a time, of LOBBY_SLOTS */
 #define LB_RULES 6
 #define LB_BTN 6 /* the right side's items: the rules 0..5 (the mode first), then the buttons 6..9 (two rows of two) */
 #define LB_RIGHT_COUNT 10
@@ -2058,6 +2058,7 @@ static void Tb_DrawProfileText(void) {
 #define LB_ACT_CHAT 3
 #define LB_ACT_LEAVE 4
 #define LB_ACT_BRACKET 5
+#define LB_ACT_WATCH 6 /* a match is on and this copy is in none: watch it */
 
 
 static char *sTbBattleName[5] = {"SINGLE BATTLE", "TEAM BATTLE", "DP BATTLE: 10 DP", "DP BATTLE: 15 DP", "DP BATTLE: 20 DP"};
@@ -2084,7 +2085,7 @@ static char *sTbLobbyLines[] = {
     "The lobby was closed by its owner.",
     "The lobby's owner removed you from the lobby.",
     "The connection to the lobby's owner was lost: the lobby is closed.",
-    "This lobby is full (8 places).",
+    "This lobby is full (16 places).",
     "The lobby owner's game is a different version: joining needs the same release.",
     "The game at that address is a different version: joining needs the same release.",
     "Someone with another version of the game tried to join.",
@@ -2310,23 +2311,30 @@ static void Tb_LobbyKeepRules(void) {
 }
 
 /* The buttons on the right, by place (0 top left, 1 top right, 2 bottom left, 3 bottom right): LB_ACT_, 0 none. The
-   owner has Start, Ready and Chat, and Bracket beside Chat while a tournament has one; a member Ready and Chat, and
-   Bracket across the bottom row. */
+   owner has Start, Ready and Chat; a member Ready and Chat; in Tournament no Ready (the places say who plays) and
+   Bracket while there is one. Watch Match is there while a match is on (this page is up: this copy is in none). */
 static s32 Tb_LobbyAct(s32 k) {
-    static const s32 own[4] = {LB_ACT_START, LB_ACT_READY, LB_ACT_CHAT, LB_ACT_BRACKET};
-    static const s32 member[4] = {LB_ACT_READY, LB_ACT_CHAT, LB_ACT_BRACKET, 0}; /* (leaving: triangle, with its yes / no) */
-    static const s32 ownTour[4] = {LB_ACT_START, LB_ACT_CHAT, LB_ACT_BRACKET, 0}; /* (Tournament: no Ready, the places say who plays) */
-    static const s32 memberTour[4] = {LB_ACT_CHAT, LB_ACT_BRACKET, 0, 0};
+    static const s32 own[4] = {LB_ACT_START, LB_ACT_READY, LB_ACT_CHAT, LB_ACT_WATCH};
+    static const s32 member[4] = {LB_ACT_READY, LB_ACT_CHAT, LB_ACT_WATCH, 0}; /* (leaving: triangle, with its yes / no) */
+    static const s32 ownTour[4] = {LB_ACT_START, LB_ACT_CHAT, LB_ACT_BRACKET, LB_ACT_WATCH};
+    static const s32 memberTour[4] = {LB_ACT_CHAT, LB_ACT_BRACKET, LB_ACT_WATCH, 0};
     s32 act = sTbLv.mode ? (sTbLv.owner ? ownTour[k & 3] : memberTour[k & 3]) : sTbLv.owner ? own[k & 3] : member[k & 3];
 
+    if (act == LB_ACT_WATCH && sTbLv.matchCount == 0) {
+        return 0;
+    }
     return act == LB_ACT_BRACKET && sTbLv.tour == 0 ? 0 : act;
 }
 
+static s32 Tb_TourNextReady(void);
 static char *Tb_LobbyActName(s32 act) {
     PortLobbyView *v = &sTbLv;
 
     switch (act) {
     case LB_ACT_START:
+        if (v->mode && v->tour == 1 && Tb_TourNextReady()) {
+            return "Start Next Match"; /* (also while another match is on: side by side) */
+        }
         if (v->phase) {
             return "Match On";
         }
@@ -2334,6 +2342,8 @@ static char *Tb_LobbyActName(s32 act) {
             return v->tour == 1 ? "Start Next Match" : v->tour == 2 ? "New Tournament" : "Start Tournament";
         }
         return "Start Match";
+    case LB_ACT_WATCH:
+        return "Watch Match";
     case LB_ACT_BRACKET:
         return "Bracket";
     case LB_ACT_READY:
@@ -2346,22 +2356,41 @@ static char *Tb_LobbyActName(s32 act) {
     return "";
 }
 
-/* A tournament's next match can begin: there is one, and neither of its two is away (a held place). */
+/* A tournament's next match can begin (the owner's game says: its two are here and free, it is not on and does not
+   wait for the owner's choice), also while other matches are on. */
 static s32 Tb_TourNextReady(void) {
     PortLobbyView *v = &sTbLv;
     s32 m = v->tourCur;
 
-    return m >= 0 && v->tourChoose < 0 && v->tourA[m] >= 0 && v->tourB[m] >= 0 && v->tourDrop[v->tourA[m]] == 0 && v->tourDrop[v->tourB[m]] == 0;
+    return v->owner && m >= 0 && m < LOBBY_TOUR - 1 && v->tourCan[m];
+}
+
+/* How many of a tournament's matches can begin now (two or more: Start All Matches). */
+static s32 Tb_TourCanCount(void) {
+    PortLobbyView *v = &sTbLv;
+    s32 m;
+    s32 n = 0;
+
+    for (m = 0; v->owner && v->tour == 1 && m < LOBBY_TOUR - 1; m++) {
+        n += v->tourCan[m] != 0;
+    }
+    return n;
 }
 
 static s32 Tb_LobbyCanStart(void) {
     PortLobbyView *v = &sTbLv;
 
-    if (!v->owner || v->phase) {
+    if (!v->owner) {
         return 0;
     }
-    if (v->mode) { /* a tournament: its next match; or a new one, of those in the player places */
-        return v->tour == 1 ? Tb_TourNextReady() : v->entrantCount >= 2;
+    if (v->mode && v->tour == 1) { /* a tournament's next match */
+        return Tb_TourNextReady();
+    }
+    if (v->phase) {
+        return 0;
+    }
+    if (v->mode) { /* a new tournament, of those in the player places */
+        return v->entrantCount >= 2;
     }
     return v->taken[0] && v->taken[1];
 }
@@ -2408,6 +2437,12 @@ static void Tb_LobbyAction(s32 act) {
     case LB_ACT_BRACKET:
         Snd_PlaySe(1, 1);
         Tb_BracketOpen();
+        break;
+    case LB_ACT_WATCH:
+        if (v->matchCount > 0) {
+            Snd_PlaySe(1, 1);
+            Port_LobbyDo(LOBBY_WATCH, (int)v->matchGen[0], 0);
+        }
         break;
     case LB_ACT_LEAVE:
         Snd_PlaySe(1, 0);
@@ -2619,6 +2654,7 @@ static s32 Tb_LobbyNews(void) {
     return 0;
 }
 
+static void Tb_LobbyScroll(void);
 static void Tb_LobbyUpdate(s32 live) {
     Pad *pad = &gPad[0];
     PortLobbyView *v = &sTbLv;
@@ -2712,7 +2748,8 @@ static void Tb_LobbyUpdate(s32 live) {
     } else if (sTb->lbCol == 0) {
         s32 side = Ps_Side();
 
-        Ps_Move(&sTb->lbPlace, LB_ROWS);
+        Ps_Move(&sTb->lbPlace, LOBBY_SLOTS);
+        Tb_LobbyScroll();
         if (side != 0 && sTb->lbPicked < 0) {
             sTb->lbCol = 1;
             Snd_PlaySe(1, 0);
@@ -2818,10 +2855,27 @@ static void Tb_LobbyUpdate(s32 live) {
 #define LB_R0 258.0f  /* the code, the rules, the buttons */
 #define LB_R1 502.0f
 
-/* The places: the players' first (1P and 2P; a tournament's Entrants rule makes 2 to 8 of them), then the
-   spectators' under their heading. */
+/* The places: the players' first (1P and 2P; a tournament's Entrants rule makes 2 to 16 of them), then the
+   spectators' under their heading. LB_ROWS of them are shown, from sTbLbTop on, which follows the cursor. */
+static s32 sTbLbTop;
+
+static void Tb_LobbyScroll(void) {
+    if (sTb->lbPlace < 0 || sTb->lbPlace >= LOBBY_SLOTS) {
+        sTb->lbPlace = 0;
+    }
+    if (sTb->lbPlace < sTbLbTop) {
+        sTbLbTop = sTb->lbPlace;
+    } else if (sTb->lbPlace >= sTbLbTop + LB_ROWS) {
+        sTbLbTop = sTb->lbPlace - LB_ROWS + 1;
+    }
+    if (sTbLbTop < 0 || sTbLbTop > LOBBY_SLOTS - LB_ROWS) {
+        sTbLbTop = sTbLbTop < 0 ? 0 : LOBBY_SLOTS - LB_ROWS;
+    }
+}
+
 static f32 Tb_LobbyRowY(s32 i) {
-    return 76.0f + 25.0f * (f32)i + (i >= sTbLv.entrants ? 24.0f : 0.0f);
+    /* (the spectators' heading takes a row's place where both kinds are in view) */
+    return 76.0f + 25.0f * (f32)(i - sTbLbTop) + (i >= sTbLv.entrants && sTbLbTop < sTbLv.entrants ? 24.0f : 0.0f);
 }
 
 static f32 Tb_LobbyRuleY(s32 i) {
@@ -2862,8 +2916,9 @@ static void Tb_DrawLobby(void) {
         Tb_LobbyHostsOut();
         return;
     }
+    Tb_LobbyScroll();
     Ps_Panel(TBO_KIT_WINDOW, LB_L0, 52.0f, LB_L1, 316.0f, 0x80);
-    for (i = 0; i < LB_ROWS; i++) {
+    for (i = sTbLbTop; i < sTbLbTop + LB_ROWS && i < LOBBY_SLOTS; i++) {
         f32 y = Tb_LobbyRowY(i);
         s32 on = sTb->lbCol == 0 && i == sTb->lbPlace && !sTb->lbChat;
 
@@ -2920,24 +2975,31 @@ static void Tb_DrawLobbyText(void) {
     if (v->state != 2) {
         return; /* (Tb_DrawLobbyWin) */
     }
-    for (i = v->entrants; i < LB_ROWS; i++) {
+    for (i = v->entrants; i < LOBBY_SLOTS; i++) {
         watch += v->taken[i];
     }
-    if (v->mode) {
+    if (sTbLbTop >= v->entrants) { /* (only spectators in view: their heading at the top) */
+        sprintf(line, Tb_Fmt("SPECTATORS  %d / %d"), (int)watch, (int)(LOBBY_SLOTS - v->entrants));
+        Ps_Text(26.0f, Ps_TextTop(64.0f, 0.5f), line, 0.5f, 150.0f, 2);
+    } else if (v->mode) {
         sprintf(line, Tb_Fmt("PLAYERS  %d / %d"), (int)v->entrantCount, (int)v->entrants);
-        Ps_Text(26.0f, Ps_TextTop(64.0f, 0.5f), line, 0.5f, 210.0f, 2);
+        Ps_Text(26.0f, Ps_TextTop(64.0f, 0.5f), line, 0.5f, 150.0f, 2);
     } else {
         Ps_Text(26.0f, Ps_TextTop(64.0f, 0.5f), "PLAYERS", 0.5f, 0.0f, 2);
     }
-    if (v->entrants < LB_ROWS) {
-        sprintf(line, Tb_Fmt("SPECTATORS  %d / %d"), (int)watch, (int)(LB_ROWS - v->entrants));
+    sprintf(line, "%d-%d / %d", (int)(sTbLbTop + 1), (int)(sTbLbTop + LB_ROWS), (int)LOBBY_SLOTS); /* (which places are in view) */
+    Ps_Align(2);
+    Ps_Text(236.0f, Ps_TextTop(64.0f, 0.42f), line, 0.42f, 60.0f, 4);
+    Ps_Align(0);
+    if (sTbLbTop < v->entrants && v->entrants < sTbLbTop + LB_ROWS) {
+        sprintf(line, Tb_Fmt("SPECTATORS  %d / %d"), (int)watch, (int)(LOBBY_SLOTS - v->entrants));
         Ps_Text(26.0f, Ps_TextTop(Tb_LobbyRowY(v->entrants) - 12.0f, 0.5f), line, 0.5f, 210.0f, 2);
     }
-    for (i = 0; i < LB_ROWS; i++) {
+    for (i = sTbLbTop; i < sTbLbTop + LB_ROWS && i < LOBBY_SLOTS; i++) {
         f32 y = Tb_LobbyRowY(i);
         f32 mid = y + 11.0f;
         s32 on = sTb->lbCol == 0 && i == sTb->lbPlace && !sTb->lbChat;
-        char tag[4];
+        char tag[8];
 
         if (i < v->entrants) {
             sprintf(tag, v->mode ? "%d" : "%dP", (int)(i + 1)); /* (a tournament's places: 1..N) */
@@ -3287,21 +3349,33 @@ static void Tb_LobbyFocus(char *focus, char *now) {
 #define BR_ACT_BACK 2
 #define BR_ACT_PICK_A 3 /* the owner's choice of a match's winner (its two games disagreed twice): its first, */
 #define BR_ACT_PICK_B 4 /* ... its second */
+#define BR_ACT_ALL 5    /* the owner: every match that can begin, side by side */
+#define BR_ACT_WATCH 6  /* anyone: watch a match that is on (up / down: which) */
+static s32 sTbBrWatch;  /* ... the one the button names, of those that are on */
 
-static char *sTbRoundName[3] = {"Final", "Semifinal", "Quarterfinal"};
+static char *sTbRoundName[4] = {"Final", "Semifinal", "Quarterfinal", "Round of 16"};
 
 static f32 Tb_BrMid(void) {
     return (BR_TOP + BR_BOTTOM) * 0.5f;
 }
 
 static s32 Tb_BrRounds(void) {
-    return sTbLv.tourSize >= 8 ? 3 : sTbLv.tourSize >= 4 ? 2 : 1;
+    return sTbLv.tourSize >= 16 ? 4 : sTbLv.tourSize >= 8 ? 3 : sTbLv.tourSize >= 4 ? 2 : 1;
+}
+
+/* A leaf's box: half its height (sixteen leaves are eight a side: lower boxes), and how much smaller its text is. */
+static f32 Tb_BrLeafH(void) {
+    return sTbLv.tourSize >= 16 ? 9.0f : 11.0f;
+}
+
+static f32 Tb_BrLeafScale(void) {
+    return sTbLv.tourSize >= 16 ? 0.84f : 1.0f;
 }
 
 static s32 Tb_BrRound(s32 m) {
     s32 r = 0;
 
-    while (r < 2 && m >= sTbLv.tourSize - (sTbLv.tourSize >> (r + 1))) {
+    while (r < 3 && m >= sTbLv.tourSize - (sTbLv.tourSize >> (r + 1))) {
         r++;
     }
     return r;
@@ -3311,7 +3385,7 @@ static s32 Tb_BrRound(s32 m) {
 static char *Tb_BrRoundName(s32 m) {
     s32 count = sTbLv.tourSize >> (Tb_BrRound(m) + 1);
 
-    return sTbRoundName[count >= 4 ? 2 : count >= 2 ? 1 : 0];
+    return sTbRoundName[count >= 8 ? 3 : count >= 4 ? 2 : count >= 2 ? 1 : 0];
 }
 
 static f32 Tb_BrLeafY(s32 j) { /* the j-th leaf of a half, from the top */
@@ -3383,22 +3457,67 @@ static s32 Tb_BrFocusMatch(void) {
     return sTbLv.tourOn >= 0 ? sTbLv.tourOn : sTbLv.tourChoose >= 0 ? sTbLv.tourChoose : sTbLv.tourCur;
 }
 
+/* Entrant e is in the match the page is about, or in one that is being played now (its box is lit). */
+static s32 Tb_BrHot(s32 e, s32 focus) {
+    PortLobbyView *v = &sTbLv;
+    s32 m;
+
+    if (e < 0) {
+        return 0;
+    }
+    if (focus >= 0 && (v->tourA[focus] == e || v->tourB[focus] == e)) {
+        return 1;
+    }
+    for (m = 0; m < LOBBY_TOUR - 1; m++) {
+        if (v->tourLive[m] && (v->tourA[m] == e || v->tourB[m] == e)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The owner chooses a match's winner now (the bracket's buttons are the two names). */
 static s32 Tb_BrChoosing(void) {
     s32 m = sTbLv.tourChoose;
 
-    return sTbLv.owner && !sTbLv.phase && m >= 0 && sTbLv.tourA[m] >= 0 && sTbLv.tourB[m] >= 0;
+    return sTbLv.owner && m >= 0 && !sTbLv.tourLive[m] && sTbLv.tourA[m] >= 0 && sTbLv.tourB[m] >= 0;
+}
+
+/* The page's buttons, left to right: the owner's Start, Start All Matches while two or more can begin, Watch while
+   a match is on, Back to the Lobby; or the two names and Back while the owner chooses a winner. Their number. */
+static s32 Tb_BracketActs(s32 *acts) {
+    s32 n = 0;
+
+    if (Tb_BrChoosing()) {
+        acts[n++] = BR_ACT_PICK_A;
+        acts[n++] = BR_ACT_PICK_B;
+        acts[n++] = BR_ACT_BACK;
+        return n;
+    }
+    if (sTbLv.owner) {
+        acts[n++] = BR_ACT_START;
+    }
+    if (Tb_TourCanCount() >= 2) {
+        acts[n++] = BR_ACT_ALL;
+    }
+    if (sTbLv.matchCount > 0) {
+        acts[n++] = BR_ACT_WATCH;
+    }
+    acts[n++] = BR_ACT_BACK;
+    return n;
 }
 
 static s32 Tb_BracketCount(void) {
-    return Tb_BrChoosing() ? 3 : sTbLv.owner ? 2 : 1;
+    s32 acts[4];
+
+    return Tb_BracketActs(acts);
 }
 
 static s32 Tb_BracketAct(s32 k) {
-    if (Tb_BrChoosing()) {
-        return k == 0 ? BR_ACT_PICK_A : k == 1 ? BR_ACT_PICK_B : BR_ACT_BACK;
-    }
-    return sTbLv.owner && k == 0 ? BR_ACT_START : BR_ACT_BACK;
+    s32 acts[4];
+    s32 n = Tb_BracketActs(acts);
+
+    return k >= 0 && k < n ? acts[k] : BR_ACT_BACK;
 }
 
 static char *Tb_BracketActName(s32 act) {
@@ -3410,7 +3529,17 @@ static char *Tb_BracketActName(s32 act) {
         return v->tourName[act == BR_ACT_PICK_A ? v->tourA[m] : v->tourB[m]];
     }
     if (act == BR_ACT_START) {
-        return v->phase ? "Match On" : v->tour == 2 ? "New Tournament" : "Start Next Match";
+        return v->tour == 2 ? "New Tournament" : v->phase && !Tb_TourNextReady() ? "Match On" : "Start Next Match";
+    }
+    if (act == BR_ACT_ALL) {
+        return "Start All Matches";
+    }
+    if (act == BR_ACT_WATCH) { /* (the two names: not translated) */
+        static char line[96];
+        s32 at = sTbBrWatch >= 0 && sTbBrWatch < v->matchCount ? sTbBrWatch : 0;
+
+        Tb_Subst(line, 96, "Watch: %s - %s", v->matchName[at][0], v->matchName[at][1], 0);
+        return line;
     }
     return "Back to the Lobby";
 }
@@ -3418,7 +3547,7 @@ static char *Tb_BracketActName(s32 act) {
 static s32 Tb_BracketCanStart(void) {
     PortLobbyView *v = &sTbLv;
 
-    return v->owner && !v->phase && (v->tour == 1 ? Tb_TourNextReady() : v->mode && v->entrantCount >= 2);
+    return v->owner && (v->tour == 1 ? Tb_TourNextReady() : !v->phase && v->mode && v->entrantCount >= 2);
 }
 
 static void Tb_BracketOpen(void) {
@@ -3469,9 +3598,30 @@ static void Tb_BracketUpdate(s32 live) {
         sTb->brCur = (sTb->brCur + Ps_Side() + count) % count;
         Snd_PlaySe(1, 0);
     }
+    if (sTbBrWatch >= v->matchCount) {
+        sTbBrWatch = 0;
+    }
+    if (Tb_BracketAct(sTb->brCur) == BR_ACT_WATCH && v->matchCount > 1) { /* which match: up / down */
+        if (pad->gameRepeat & (PADG_DOWN | PADG_DOWN2)) {
+            sTbBrWatch = (sTbBrWatch + 1) % v->matchCount;
+            Snd_PlaySe(1, 0);
+        } else if (pad->gameRepeat & (PADG_UP | PADG_UP2)) {
+            sTbBrWatch = (sTbBrWatch + v->matchCount - 1) % v->matchCount;
+            Snd_PlaySe(1, 0);
+        }
+    }
     if (pad->gamePressed & PADG_CROSS) {
         if (Tb_BracketAct(sTb->brCur) == BR_ACT_START) {
             Tb_BracketStart();
+        } else if (Tb_BracketAct(sTb->brCur) == BR_ACT_ALL) {
+            Snd_PlaySe(1, 1);
+            Port_LobbyDo(LOBBY_TOUR_START, -1, 0);
+            sTb->brCur = 0;
+        } else if (Tb_BracketAct(sTb->brCur) == BR_ACT_WATCH) {
+            if (v->matchCount > 0) {
+                Snd_PlaySe(1, 1);
+                Port_LobbyDo(LOBBY_WATCH, (int)v->matchGen[sTbBrWatch], 0);
+            }
         } else if (Tb_BracketAct(sTb->brCur) != BR_ACT_BACK) { /* the owner's choice of the winner: final */
             Snd_PlaySe(1, 1);
             Port_LobbyDo(LOBBY_TOUR_CHOOSE, Tb_BracketAct(sTb->brCur) == BR_ACT_PICK_A ? 0 : 1, 0);
@@ -3503,7 +3653,10 @@ static void Tb_BrLine(f32 x0, f32 y0, f32 x1, f32 y1, u32 c) {
 }
 
 static void Tb_BrBtnBox(s32 k, f32 *x0, f32 *x1) {
-    if (Tb_BracketCount() == 3) { /* (the two names, then Back to the Lobby) */
+    if (Tb_BracketCount() >= 4) {
+        *x0 = 16.0f + 122.0f * (f32)k;
+        *x1 = *x0 + 114.0f;
+    } else if (Tb_BracketCount() == 3) { /* (the two names, then Back to the Lobby; or three of the page's own) */
         *x0 = 52.0f + 140.0f * (f32)k;
         *x1 = *x0 + 128.0f;
     } else if (Tb_BracketCount() == 1) {
@@ -3549,7 +3702,7 @@ static void Tb_DrawBracket(void) {
                 c = bye;
             } else if (p >= 0 && v->tourWin[m] == p) {
                 c = gold;
-            } else if (m == focus && p >= 0) {
+            } else if ((m == focus || v->tourLive[m]) && p >= 0) { /* (the next, and every one that is on) */
                 c = glow;
             }
             Tb_BrLine(fx, fy, nx, ny, c);
@@ -3564,17 +3717,18 @@ static void Tb_DrawBracket(void) {
         f32 x0 = half ? 512.0f - BR_LEAF_X1 : BR_LEAF_X0;
         f32 x1 = half ? 512.0f - BR_LEAF_X0 : BR_LEAF_X1;
         s32 e = v->tourLeaf[l];
+        f32 h = Tb_BrLeafH();
 
         if (e < 0) {
-            Ps_Pill(TBO_KIT_BAR, x0, y - 11.0f, x1, y + 11.0f, 0x40);
+            Ps_Pill(TBO_KIT_BAR, x0, y - h, x1, y + h, 0x40);
         } else if (e == v->tourChamp) {
-            Ps_Pill(TBO_KIT_GOLD, x0, y - 11.0f, x1, y + 11.0f, 0x80);
+            Ps_Pill(TBO_KIT_GOLD, x0, y - h, x1, y + h, 0x80);
         } else if (v->tourDrop[e] > 0) { /* (away: its place held) */
-            Ps_Pill(TBO_KIT_BAR, x0, y - 11.0f, x1, y + 11.0f, 0x58);
-        } else if (focus >= 0 && (v->tourA[focus] == e || v->tourB[focus] == e)) {
-            Ps_Pill(TBO_KIT_SEL, x0 - 2.0f, y - 13.0f, x1 + 2.0f, y + 13.0f, 0x80);
+            Ps_Pill(TBO_KIT_BAR, x0, y - h, x1, y + h, 0x58);
+        } else if (Tb_BrHot(e, focus)) {
+            Ps_Pill(TBO_KIT_SEL, x0 - 2.0f, y - h - 2.0f, x1 + 2.0f, y + h + 2.0f, 0x80);
         } else {
-            Ps_Pill(TBO_KIT_BAR, x0, y - 11.0f, x1, y + 11.0f, v->tourGone[e] || Tb_BrOut(e) ? 0x58 : 0x80);
+            Ps_Pill(TBO_KIT_BAR, x0, y - h, x1, y + h, v->tourGone[e] || Tb_BrOut(e) ? 0x58 : 0x80);
         }
     }
     /* the champion's box */
@@ -3675,7 +3829,7 @@ static void Tb_DrawBracketText(void) {
         }
     }
     Ps_Align(2);
-    Ps_Text(486.0f, Ps_TextTop(66.0f, 0.46f), v->tourOn >= 0 ? "A MATCH IS ON" : v->tour == 2 ? "TOURNAMENT OVER" : "TOURNAMENT ON", 0.46f, 160.0f, v->tour == 2 ? 4 : 5);
+    Ps_Text(486.0f, Ps_TextTop(66.0f, 0.46f), v->matchCount > 1 ? "MATCHES ARE ON" : v->tourOn >= 0 ? "A MATCH IS ON" : v->tour == 2 ? "TOURNAMENT OVER" : "TOURNAMENT ON", 0.46f, 160.0f, v->tour == 2 ? 4 : 5);
     Ps_Align(0);
     for (l = 0; l < size; l++) {
         s32 half = l >= size / 2;
@@ -3683,27 +3837,28 @@ static void Tb_DrawBracketText(void) {
         f32 x0 = half ? 512.0f - BR_LEAF_X1 : BR_LEAF_X0;
         f32 x1 = half ? 512.0f - BR_LEAF_X0 : BR_LEAF_X1;
         s32 e = v->tourLeaf[l];
-        s32 on = e >= 0 && focus >= 0 && (v->tourA[focus] == e || v->tourB[focus] == e) && e != v->tourChamp;
+        s32 on = Tb_BrHot(e, focus) && e != v->tourChamp;
         s32 tag = e >= 0 && v->tourDrop[e] == 0 && (v->tourGone[e] || e == v->tourMe);
         f32 room = x1 - x0 - (tag ? 50.0f : 24.0f);
         /* the entrant's picture at the box's outer end, its name after it */
         s32 dim = e >= 0 && (v->tourGone[e] || Tb_BrOut(e)) ? 0x50 : 0x80;
-        s32 dot = e >= 0 ? Tb_SquadDot(v->tourName[e], half ? x1 - 13.0f : x0 + 13.0f, y, 13.5f, dim) : 0; /* the squad's colour: a ring round the picture */
-        s32 pic = e >= 0 ? Tb_Avatar(v->tourAvatar[e], half ? x1 - 13.0f : x0 + 13.0f, y, dot ? 22.0f : 26.0f, dim) : 0; /* (smaller inside a ring) */
+        f32 sc = Tb_BrLeafScale();
+        s32 dot = e >= 0 ? Tb_SquadDot(v->tourName[e], half ? x1 - 13.0f : x0 + 13.0f, y, 13.5f * sc, dim) : 0; /* the squad's colour: a ring round the picture */
+        s32 pic = e >= 0 ? Tb_Avatar(v->tourAvatar[e], half ? x1 - 13.0f : x0 + 13.0f, y, (dot ? 22.0f : 26.0f) * sc, dim) : 0; /* (smaller inside a ring) */
         f32 in = pic || dot ? 29.0f : 12.0f;
 
         room -= in - 12.0f;
         Ps_Align(half ? 2 : 0);
         if (e < 0) {
-            Ps_Text(half ? x1 - 12.0f : x0 + 12.0f, Ps_TextTop(y, 0.5f), "BYE", 0.5f, 0.0f, 4);
+            Ps_Text(half ? x1 - 12.0f : x0 + 12.0f, Ps_TextTop(y, 0.5f * sc), "BYE", 0.5f * sc, 0.0f, 4);
         } else if (v->tourDrop[e] > 0) { /* its game fell silent: the place is held, the time left under the name */
             static char away[48];
 
             sprintf(away, Tb_Fmt("DISCONNECTED %d:%02d"), (int)(v->tourDrop[e] / 60), (int)(v->tourDrop[e] % 60));
-            Ps_Text(half ? x1 - in : x0 + in, Ps_TextTop(y - 5.0f, 0.44f), v->tourName[e], 0.44f, x1 - x0 - 12.0f - in, 4);
-            Ps_Text(half ? x1 - in : x0 + in, Ps_TextTop(y + 6.0f, 0.38f), away, 0.38f, x1 - x0 - 12.0f - in, 3);
+            Ps_Text(half ? x1 - in : x0 + in, Ps_TextTop(y - 5.0f * sc, 0.44f * sc), v->tourName[e], 0.44f * sc, x1 - x0 - 12.0f - in, 4);
+            Ps_Text(half ? x1 - in : x0 + in, Ps_TextTop(y + 6.0f * sc, 0.38f * sc), away, 0.38f * sc, x1 - x0 - 12.0f - in, 3);
         } else {
-            Ps_Text(half ? x1 - in : x0 + in, Ps_TextTop(y, 0.54f), v->tourName[e], 0.54f, room,
+            Ps_Text(half ? x1 - in : x0 + in, Ps_TextTop(y, 0.54f * sc), v->tourName[e], 0.54f * sc, room,
                     on ? 1 : v->tourGone[e] || Tb_BrOut(e) ? 4 : e == v->tourMe ? 3 : 0);
         }
         Ps_Align(0);
@@ -3723,7 +3878,7 @@ static void Tb_DrawBracketText(void) {
         Ps_Text(256.0f, Ps_TextTop((BR_CH_Y0 + BR_CH_Y1) * 0.5f, 0.6f), "?", 0.6f, 0.0f, 4);
     }
     Ps_Text(256.0f, Ps_TextTop(Tb_BrMid() + 15.0f, 0.42f), "FINAL", 0.42f, 80.0f, focus == size - 2 && v->tour == 1 ? 3 : 4);
-    if (v->tourChoose >= 0 && !v->phase) {
+    if (v->tourChoose >= 0 && !v->tourLive[v->tourChoose]) {
         Ps_Text(256.0f, Ps_TextTop(BR_BTN_Y - 9.0f, 0.42f), v->owner ? "THE TWO GAMES DISAGREE ON THIS MATCH: CHOOSE THE WINNER" : "THE OWNER IS CHOOSING THE WINNER",
                 0.42f, 440.0f, 1);
     }

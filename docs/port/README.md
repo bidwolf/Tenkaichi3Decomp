@@ -4950,3 +4950,77 @@ Asked by the user: squads in full, for a company's teams and for friends outside
   score line and the coloured rings on the owner's bracket.
 - **Not checked:** left / right on the Player Card pressed by hand, a tournament played to its end (so the score
   counting and the result's post from the game), the dots on a lobby's rows, two machines, Windows and Linux.
+
+## Lobbies, version 4: matches side by side, each watched at its host (2026-11-14)
+
+Asked by the user (docs/port/lobby_v4_plan.md): a tournament's matches at the same time, anyone watching any match
+that is on. Steps 1 to 4 of the plan; a lobby still has eight places. **A game of this version does not talk to
+version 3** (0.1.39.7 and before): it is told the versions differ. On the branch `lobby-v4`, in no release.
+
+- **A table of matches** (`net_lobby.c`, `LMatch`, `MATCHES` = 4) in place of the lobby's one match (`phase`, `gen`,
+  `players`). A match has a number, two players, the bracket's match it is (or none), and a key. STATE carries the
+  table after the bracket (688 bytes), GO the key and, for a spectator, the host's two addresses; BACK says whether
+  the match is over or this member alone leaves it; ALIVE carries the member's wish (the match to watch, 0 none);
+  WATCHERS (type 44) tells a match's host where its spectators are.
+- **A match is watched at its host.** The owner no longer passes matches on (`Lobby_ServesSpectators` is gone; in
+  net.c only `sMode == 1` serves). A spectator's greeting carries the match's key (`Lobby_WatchKey`, after its
+  flags), the host takes it only with the right one (`Lobby_WatchKeyOk`), and knocks at the addresses the owner
+  told it (`NetIo_Knock`). A spectator greets both of the host's addresses and takes the one that answers.
+- **Who is where** (`drive`, every look at the socket): each member should be in the match it plays, else the one
+  it watches; GO until it is there, BACK when it is in another. The owner's own session the same way: it can play,
+  watch, or stay on the lobby's page. When a match begins, everyone in none is sent to watch it (the first that has
+  room, six a match); one who asks for none stays out until no match is on.
+- **Tournaments**: `t_can_start(m)` per match of the bracket (both entrants here and in no match, a free entry);
+  `LOBBY_TOUR_START -1` begins all that can, and only then sends the rest to watch; results, replays and the
+  owner's choice are per match (`t_decide(x)`, `wait[]`); a walkover closes the match that was on (`t_sweep`).
+  The places no longer move when a match begins.
+- **The screens**: the bracket page lights every match that is on and has Start All Matches (two or more can
+  begin) and Watch (up / down choose the match) beside Start Next Match and Back; the lobby's page has Watch Match
+  while one is on. A spectator's pause menu has Watch (another match: left / right), Back to the Lobby (this copy
+  alone), and the owner's End the Match. Portuguese for the six new lines (`onfly_pt.py`).
+- **Testing switches**: `BT3_LOBBY_DO` has `all`, `watch <n>` (0: none), `waitmatches <n>`.
+
+**Tried** (macOS arm64, 127.0.0.1 by address, every copy but one without a window, players fed a table of random
+presses with `BT3_NET_SCRIPT`, 60 s battles, rollback 8):
+
+| case | result |
+|---|---|
+| versus, owner + 3: the owner hosts (two watch it); then a member hosts, the owner and a member watch it | both matches played; every spectator's check values the same as its host's |
+| tournament of 4 + a fifth member: both semifinals at once, the fifth switching to the other match, then stopping; the final | two matches on at once, the bracket advanced, champion; the fifth was sent to the final; 0 check values differed |
+| the same, a player leaving 30 s into its match | "left the lobby", its rival won by walkover, the other match went on; the final played |
+| 2 entrants, the member reporting the other winner (`BT3_TEST_RESULT_LIE`) | played again once, then the owner asked and its choice made the champion |
+| the bracket page with two matches on (a window, Portuguese) | looked at: both lit, "LUTAS EM CURSO", Assistir with the two names |
+
+**Not tried**: two machines and anything behind a router (a host reached by its spectators), the relay, Windows and
+Linux (not compiled there), the pages driven by a pad (the lobby page's Watch Match, the spectator's new menu
+lines), a rejoin while other matches are on, a version 3 game knocking.
+
+### Sixteen places, a bracket of sixteen (2026-11-14)
+
+Step 5 of the plan, on top of the above (the same LOBBY_VERSION 4: no release has had either).
+
+- **Sizes**: `LOBBY_SLOTS` and `LOBBY_TOUR` are 16, `LOBBY_MATCHES` 8. The Entrants rule goes from 2 to 16; a bracket
+  has 2, 4, 8 or 16 leaves (`kByePairs16` shares the byes out; `t_round` knows four rounds).
+- **Two packets in place of one**: STATE (732 bytes: the places, the rules, the note, the code, the matches that are
+  on; its layout is the `ST_` offsets) and BRACKET (type 45, 480 bytes, the `BK_` offsets), both with every state.
+  The mode and the Entrants rule moved into STATE's words; the member's nonce is its word 10.
+- **The screens**: the lobby's page shows eight places at a time and follows the cursor ("9-16 / 16" beside the
+  heading; the spectators' heading moves to the top when only they are in view); the bracket page draws sixteen
+  leaves eight a side with lower boxes and smaller names, and names the first round "Round of 16".
+- **The service**: `worker.js` takes twenty members joining a room in two minutes (it took twelve). Not deployed:
+  until it is, a thirteenth member joining by code within two minutes is told to try again soon.
+- **A match's spectators are still six** (step 6 is not done): with sixteen in a lobby and one match on, those past
+  the sixth are left on the lobby's page.
+- **Testing switches**: `BT3_LOBBY_DO` `autotour` (every match begun as soon as it can be, until the tournament is
+  over), `BT3_TEST_CONNECT_S=<s>` (the time a match's players have to connect, 40 s: ten copies on one machine need
+  more).
+
+**Tried** (as above; ten copies on one Mac, `BT3_TEST_CONNECT_S=150`): owner + 9, a tournament of ten in a bracket of
+sixteen (six byes), `autotour`: up to four matches on at once, seven matches decided and the bracket advanced each
+time, no check value of a spectator differed; the run's ten minutes ended during the semifinals, so **the final and
+the champion of a bracket of sixteen were not reached**. One match was begun again by itself: its host gave up on a
+joiner that was slow to answer (the machine was loaded: a start-up took 43 s instead of 10), the lobby said "played
+again" and the second try connected.
+
+**Not tried**: more than ten copies, a full bracket of sixteen, eight matches at once, the lobby's page scrolled by a
+pad, everything listed as not tried above.
