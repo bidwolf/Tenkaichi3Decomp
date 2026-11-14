@@ -1,11 +1,30 @@
 # Lobbies, next protocol: matches side by side, watching any of them, more than eight
 
-A PLAN, not built. Asked by the user on 2026-11-14: a tournament's matches should be able to run at the same time,
-anyone in the lobby (in the bracket or not) should be able to watch any match that is on, and a lobby should hold
-more than eight. This file is where a new session starts from; update it as steps land.
+Asked by the user on 2026-11-14: a tournament's matches should be able to run at the same time, anyone in the lobby
+(in the bracket or not) should be able to watch any match that is on, and a lobby should hold more than eight. This
+file is where a new session starts from; update it as steps land.
 
-Nothing below has been tried. Where it says how today's code works, that was read in `port/src/gs/net_lobby.c`
-(its heading comment and the functions named) on that day; read them again before relying on a line.
+## Where it stands (2026-11-14, branch `lobby-v4`)
+
+**Built and tried on one Mac** (steps 1 to 4 below): LOBBY_VERSION 4. The owner keeps a table of matches; each match
+is watched at its host (the player on the left), with a key the owner draws; matches of a tournament run side by
+side; anyone not playing chooses the match to watch, changes it, or stays on the lobby's page. What it is and how
+it was tried: docs/port/README.md, "Lobbies, version 4".
+
+**Not built**: more than eight places (step 5: STATE in parts, the screens for sixteen), more than six spectators a
+match (step 6), a list of the matches on the lobby's page (it has one Watch Match button, for the first that is on;
+the bracket's button chooses).
+
+**Not tried**: two machines, routers (a match's host must be reachable by its spectators: the owner tells the host
+where they are and it knocks at them; behind routers this has never run), the relay with a member as host, Windows
+and Linux, a person with a controller, the pages by pad, a rejoin (a held place) while other matches are on.
+
+**The open questions** were answered by default, to be changed if the user says otherwise: eight still (sixteen is
+step 5); side by side is the owner's choice (Start Next Match starts one, Start All Matches all that can begin);
+a versus lobby has one match at a time.
+
+What follows is the plan as it was written before the work. Where it says how the code works, that was version 3's
+(`port/src/gs/net_lobby.c` on that day).
 
 ## What there is today (LOBBY_VERSION 3)
 

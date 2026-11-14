@@ -274,6 +274,7 @@ static struct {
     /* both */
     int leaving, closing, closedBy; /* closedBy: the owner closed it / removed this member (CLOSE) */
     int ownLeaving;            /* the owner: its own session is ending now (Lobby_SessionLeaving) */
+    int batch;                 /* the owner: several matches are being begun together (who watches: after the last) */
     int wantReady;             /* a member: READY asked for, until the owner's word says it (-1 none) */
     uint32_t chatOut;          /* a member: its lines so far; the owner: the lobby's */
     uint32_t chatIn;           /* a member: the owner's last line taken */
@@ -1267,14 +1268,18 @@ static LMatch *match_begin(int a, int b, int tm, int ea, int eb) {
     SDL_snprintf(text, sizeof(text), "Match %u: %s vs %s", (unsigned)x->gen, sL.m[a].name, sL.m[b].name);
     note_set(text);
     log_table();
-    for (k = 0; k < LOBBY_SLOTS; k++) { /* everyone who is in no match watches this one */
-        watch_auto(k);
-    }
     if (sL.t.state == 1) {
         sL.t.cur = t_next();
     }
-    state_all();
-    drive();
+    if (!sL.batch) {
+        for (k = 0; k < LOBBY_SLOTS; k++) { /* everyone who is in no match watches this one */
+            watch_auto(k);
+        }
+    }
+    state_all(); /* (each match's note reaches the members: STATE carries the last one) */
+    if (!sL.batch) {
+        drive();
+    }
     return x;
 }
 
@@ -2090,9 +2095,17 @@ static void owner_do(int what, int a, int b) {
         if (a >= 0) {
             t_start(a);
         } else {
+            int k;
+            sL.batch = 1;
             for (m = 0; m < t_matches(); m++) { /* (every match that can begin: side by side) */
                 t_start(m);
             }
+            sL.batch = 0;
+            for (k = 0; k < LOBBY_SLOTS; k++) { /* (those left in no match watch one) */
+                watch_auto(k);
+            }
+            state_all();
+            drive();
         }
     } else if (what == LOBBY_WATCH) {
         watch_set(0, (uint32_t)a);

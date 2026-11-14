@@ -192,6 +192,9 @@ PT = {
     "LOBBY CODE": "LOCALIZADOR", "GIVE IT TO THE OTHERS": "PASSE PARA OS OUTROS", "THE OTHERS JOIN WITH IT": "OS OUTROS ENTRAM COM ELE",
     "PORT": "PORTA", "LOBBY": "SALA DE EMBARQUE", "JOINED BY ADDRESS": "CHECK-IN POR ENDEREÇO",
     "A MATCH IS ON": "LUTA EM CURSO", "TOURNAMENT ON": "RINHA EM CURSO", "TOURNAMENT OVER": "RINHA ENCERRADA",
+    # matches side by side, watching any of them (lobby version 4)
+    "MATCHES ARE ON": "LUTAS EM CURSO", "Start All Matches": "Decolar Todas", "Watch Match": "Assistir à Luta",
+    "Watch: %s - %s": "Assistir: %s - %s", "Watch: ": "Assistir: ", "End the Match": "Encerrar a Luta",
     "RULES": "POLÍTICA", "RULES (THE OWNER'S)": "POLÍTICA (DO GESTOR)",
     "Opening the Lobby": "Abrindo a Sala", "Joining the Lobby": "Fazendo Check-in",
     "Looking for the lobby's owner...": "Procurando o gestor da sala...", "Opening the port...": "Abrindo a porta...",

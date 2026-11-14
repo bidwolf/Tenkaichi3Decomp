@@ -2,7 +2,7 @@
   "schema_version": 1,
   "labels_version": 1,
   "translation_version": 1,
-  "labels_count": 534,
+  "labels_count": 540,
   "locale": "pt",
   "name": "Português (Onfly)",
   "order": 2,
@@ -1132,6 +1132,11 @@
       "text": "Próxima Decolagem",
       "note": "in Tb_Mean"
     },
+    "tbo/a2280bd1": {
+      "original": "Start All Matches",
+      "text": "Decolar Todas",
+      "note": "in Tb_Mean"
+    },
     "tbo/8dbf37f0": {
       "original": "New Tournament",
       "text": "Nova Rinha",
@@ -1932,6 +1937,11 @@
       "text": "Luta em Curso",
       "note": "a button of the lobby's page"
     },
+    "tbo/44bdd5e9": {
+      "original": "Watch Match",
+      "text": "Assistir à Luta",
+      "note": "a button of the lobby's page"
+    },
     "tbo/f6157c13": {
       "original": "Bracket",
       "text": "Itinerário",
@@ -2267,6 +2277,11 @@
       "text": "Quartas de final",
       "note": "a round of a tournament, after \"Next: A vs B\" in brackets"
     },
+    "tbo/77597ab3": {
+      "original": "Watch: %s - %s",
+      "text": "Assistir: %s - %s",
+      "note": "a button of the tournament's bracket page; keep the %d / %02d parts, in this order (and %% for a % sign)"
+    },
     "tbo/0641ef78": {
       "original": "Back to the Lobby",
       "text": "Voltar para a Sala",
@@ -2276,6 +2291,11 @@
       "original": "%d ENTRANTS",
       "text": "%d VIAJANTES",
       "note": "the tournament's bracket page (its boxes, labels and buttons); keep the %d / %02d parts, in this order (and %% for a % sign)"
+    },
+    "tbo/2ef68585": {
+      "original": "MATCHES ARE ON",
+      "text": "LUTAS EM CURSO",
+      "note": "the tournament's bracket page (its boxes, labels and buttons)"
     },
     "tbo/b6a8bbc3": {
       "original": "BYE",
@@ -2675,6 +2695,16 @@
     "tbo/3c612e52": {
       "original": "View: ",
       "text": "Visão: ",
+      "note": "an item of a spectator's own pause menu (the battle's pause menu box)"
+    },
+    "tbo/d686a2e2": {
+      "original": "Watch: ",
+      "text": "Assistir: ",
+      "note": "an item of a spectator's own pause menu (the battle's pause menu box)"
+    },
+    "tbo/d2ea6d88": {
+      "original": "End the Match",
+      "text": "Encerrar a Luta",
       "note": "an item of a spectator's own pause menu (the battle's pause menu box)"
     }
   }
