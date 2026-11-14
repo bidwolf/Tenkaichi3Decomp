@@ -91,7 +91,11 @@
 
 #define MAGIC 0x4E335442u
 enum { T_HELLO = 1, T_HELLO_ACK = 2, T_SPEC_HELLO = 20, T_SPEC_NO = 22, SPEC_NO_VERSION = 1 };
-enum { T_L_HELLO = 30, T_L_NO, T_L_STATE, T_L_ALIVE, T_L_GO, T_L_BACK, T_L_LEAVE, T_L_CLOSE, T_L_CHAT, T_L_SAID, T_L_INVITE, T_L_TOKEN };
+enum { T_L_HELLO = 30, T_L_NO, T_L_STATE, T_L_ALIVE, T_L_GO, T_L_BACK, T_L_LEAVE, T_L_CLOSE, T_L_CHAT, T_L_SAID, T_L_INVITE, T_L_TOKEN,
+       T_L_AVATAR,  /* member -> owner  {its id, its picture's reference (AVB bytes)}: every few seconds while it has one */
+       T_L_AVATARS  /* owner -> member  {count, count x (a member's id, its reference)}: the pictures of everyone in the lobby.
+                       Both are outside what a copy without pictures knows: it ignores them, and LOBBY_VERSION stays */
+     };
 enum { LOBBY_VERSION = 3, /* 2: STATE carries the member's nonce (its greeting's), which a member connecting asks for; 3: tournaments (the bracket in STATE, results in ALIVE, the rejoin token in HELLO, TOKEN) */ FP_MARK = 0x46505231, LOBBY_CAP = 0x4C4F4231 /* "1BOL": a game's 1v1 greeting says it knows lobbies */ };
 enum { LNO_VERSION = 1, LNO_DATA = 2, LNO_FULL = 3 };
 enum { CLOSE_CLOSED = 1, CLOSE_KICKED = 2 };
@@ -370,6 +374,9 @@ static int t_next(void) {
 
 /* ---- the window's copy ---- */
 
+static const char *av_of(uint32_t id); /* (a member's picture, below) */
+static void result_post(void);         /* (a finished tournament, told to the service: below) */
+
 static void view_update(int force) {
     uint64_t now = now_ns();
     int i;
@@ -395,6 +402,7 @@ static void view_update(int force) {
         sView.ready[i] = sL.ready[i];
         sView.isOwner[i] = sL.ids[i] != 0 && sL.ids[i] == sL.ownerId;
         SDL_strlcpy(sView.name[i], sL.ids[i] != 0 ? sL.names[i] : "", LOBBY_NAME);
+        SDL_strlcpy(sView.avatar[i], av_of(sL.ids[i]), sizeof(sView.avatar[i]));
         if (sL.ids[i] != 0 && sL.ids[i] == sL.myId) {
             sView.me = i;
         }
@@ -434,6 +442,7 @@ static void view_update(int force) {
     for (i = 0; i < TOUR; i++) {
         int on = sView.tour != 0 && i < sL.t.count;
         SDL_strlcpy(sView.tourName[i], on ? sL.t.name[i] : "", LOBBY_NAME);
+        SDL_strlcpy(sView.tourAvatar[i], on ? av_of(sL.t.id[i]) : "", sizeof(sView.tourAvatar[i]));
         sView.tourGone[i] = on && sL.t.gone[i];
         sView.tourDrop[i] = on && !sL.t.gone[i] ? sL.t.dropSecs[i] : 0;
         sView.tourLeaf[i] = sView.tour != 0 && i < sL.t.size ? sL.t.leaf[i] : -1;
@@ -661,6 +670,58 @@ static void tour_get(const uint8_t *p) {
     if (sL.t.cur >= size - 1) { sL.t.cur = -1; }
     if (sL.t.champ >= count) { sL.t.champ = -1; }
     if (sL.t.playing >= size - 1) { sL.t.playing = -1; }
+}
+
+/* ---- the players' pictures: who has which, by the member's id (the pictures themselves: gs/avatar.c) ---- */
+#define AVB 64
+#define AV_EVERY_NS (3 * SEC)
+enum { AV_KEPT = 16 };
+extern void Discord_Avatar(char *out, int size); /* gs/discord.c: this player's own reference, "" none */
+extern int Avatar_RefOk(const char *ref);        /* gs/avatar.c */
+static struct { uint32_t id; char ref[AVB]; } sAv[AV_KEPT];
+static uint64_t sAvNs;
+
+static const char *av_of(uint32_t id) {
+    int i;
+    for (i = 0; id != 0 && i < AV_KEPT; i++) {
+        if (sAv[i].id == id) {
+            return sAv[i].ref;
+        }
+    }
+    return "";
+}
+
+/* A member's reference, kept only if it is one ("": it has none now). */
+static void av_set(uint32_t id, const char *ref) {
+    int i, spare = -1;
+    if (id == 0) {
+        return;
+    }
+    for (i = 0; i < AV_KEPT; i++) {
+        if (sAv[i].id == id) {
+            spare = i;
+            break;
+        }
+        if (sAv[i].id == 0 && spare < 0) {
+            spare = i;
+        }
+    }
+    if (spare < 0) {
+        return;
+    }
+    if (!Avatar_RefOk(ref)) {
+        memset(&sAv[spare], 0, sizeof(sAv[spare]));
+        return;
+    }
+    sAv[spare].id = id;
+    SDL_strlcpy(sAv[spare].ref, ref, AVB);
+}
+
+static void av_packet_one(const uint8_t *pkt, uint32_t id) { /* (an entry of AVB bytes at pkt, ended here whatever came) */
+    char ref[AVB];
+    memcpy(ref, pkt, AVB);
+    ref[AVB - 1] = '\0';
+    av_set(id, ref);
 }
 
 static void state_send(int k) {
@@ -981,6 +1042,7 @@ static void t_resolve(void) {
         sL.t.champ = sL.t.win[m];
         SDL_snprintf(text, sizeof(text), "%s is the champion!", sL.t.name[sL.t.champ]);
         note_set(text);
+        result_post();
     }
     t_tokens();
     sL.dirty = 1;
@@ -1042,6 +1104,35 @@ static void t_new(void) {
             sL.t.leaf[i] = order[s++];
         }
     }
+    /* Squads (gs/squads.c: the tag a name begins with): where the draw put two of one squad against each other in
+       the first round and a swap with a later (else an earlier) leaf parts them without pairing two of another
+       squad, the swap is made. With one squad, or none, the draw stays as the shuffle made it. */
+    for (i = 0; i + 1 < sL.t.size; i += 2) {
+        extern int PortSquad_NameTag(const char *name, char *out);
+        char ta[8], tb[8], tc[8], td[8];
+        int a = sL.t.leaf[i], b = sL.t.leaf[i + 1], pass, j;
+        if (a < 0 || b < 0 || !PortSquad_NameTag(sL.t.name[a], ta) || !PortSquad_NameTag(sL.t.name[b], tb) || strcmp(ta, tb) != 0) {
+            continue;
+        }
+        for (pass = 0; pass < 2 && sL.t.leaf[i + 1] == b; pass++) {
+            for (j = pass == 0 ? i + 2 : 0; j < (pass == 0 ? sL.t.size : i); j++) {
+                int c = sL.t.leaf[j], d = sL.t.leaf[j ^ 1];
+                if (c < 0) {
+                    continue;
+                }
+                PortSquad_NameTag(sL.t.name[c], tc);
+                if (strcmp(tc, ta) == 0) {
+                    continue; /* (it would meet `a` as one of its own squad again) */
+                }
+                if (d >= 0 && PortSquad_NameTag(sL.t.name[d], td) && strcmp(td, tb) == 0) {
+                    continue; /* (`b` would meet one of its own there) */
+                }
+                sL.t.leaf[i + 1] = c;
+                sL.t.leaf[j] = b;
+                break;
+            }
+        }
+    }
     for (i = 0; i < TOUR - 1; i++) {
         sL.t.win[i] = -1;
     }
@@ -1055,6 +1146,62 @@ static void t_new(void) {
     }
     fprintf(stderr, "bt3: lobby: tournament %u drawn (seed %08x)\n", (unsigned)sL.t.gen, (unsigned)sL.t.seed);
     t_resolve();
+}
+
+/* ---- a finished tournament, told to the matchmaking service for its ranking (port/matchmaking/supabase: POST
+   /v1/result): the champion and each match that was played or won by walkover, by the names the bracket has. Sent by
+   the owner's game alone, once, on a thread (the answer is not waited for by the game). BT3_NO_RESULT=1: not sent. ---- */
+extern int Match_Post(const char *what, const char *json, char *out, size_t size); /* gs/net_match.c */
+extern const char *PortSquad_MyGroupId(void);                                       /* gs/squads.c */
+
+static int SDLCALL result_thread(void *json) {
+    char out[256] = "";
+    int ok = Match_Post("result", (const char *)json, out, sizeof(out));
+    fprintf(stderr, "bt3: lobby: the tournament's result %s\n", ok && strstr(out, "\"ok\"") != NULL ? "was sent for the ranking" : "could not be sent for the ranking");
+    SDL_free(json);
+    return 0;
+}
+
+static int json_name(char *out, int room, const char *name) { /* a name as a JSON string's inside; the bytes written */
+    int n = 0;
+    for (; *name != '\0' && n < room - 2; name++) {
+        if (*name == '"' || *name == '\\') {
+            out[n++] = '\\';
+        }
+        if ((unsigned char)*name >= 32 && *name != 127) {
+            out[n++] = *name;
+        }
+    }
+    out[n] = '\0';
+    return n;
+}
+
+static void result_post(void) {
+    char *json, a[48], b[48], w[48];
+    int m, n, count = 0;
+    SDL_Thread *t;
+
+    if (sL.on != 1 || sL.t.champ < 0 || getenv("BT3_NO_RESULT") != NULL || (json = (char *)SDL_malloc(2048)) == NULL) {
+        return;
+    }
+    json_name(w, sizeof(w), sL.t.name[sL.t.champ]);
+    n = SDL_snprintf(json, 2048, "{\"grp\":\"%s\",\"champion\":\"%s\",\"entrants\":%d,\"matches\":[", PortSquad_MyGroupId(), w, sL.t.count);
+    for (m = 0; m < t_matches(); m++) {
+        int ea = t_part(m, 0), eb = t_part(m, 1);
+        if (ea < 0 || eb < 0 || sL.t.win[m] < 0 || sL.t.how[m] == HOW_BYE) {
+            continue;
+        }
+        json_name(a, sizeof(a), sL.t.name[ea]);
+        json_name(b, sizeof(b), sL.t.name[eb]);
+        n += SDL_snprintf(json + n, 2048 - (size_t)n, "%s{\"a\":\"%s\",\"b\":\"%s\",\"w\":\"%s\"}", count++ ? "," : "", a, b, sL.t.win[m] == ea ? a : b);
+    }
+    SDL_snprintf(json + n, 2048 - (size_t)n, "]}");
+    t = count > 0 ? SDL_CreateThread(result_thread, "bt3-result", json) : NULL;
+    if (t != NULL) {
+        SDL_DetachThread(t);
+    } else {
+        SDL_free(json);
+    }
 }
 
 static int member_by_id(uint32_t id) {
@@ -1385,9 +1532,75 @@ static void owner_hello(const uint8_t *pkt, int n, const struct sockaddr_in *fro
 
 static void owner_say(int k, const char *text);
 
+/* Every few seconds in a lobby: a member tells the owner its picture, the owner tells every member everyone's. */
+static void av_tick(void) {
+    uint64_t now = now_ns();
+    char own[AVB];
+    int k, s, e;
+
+    if (sL.on == 0 || sL.state != 2 || now - sAvNs < AV_EVERY_NS) {
+        return;
+    }
+    sAvNs = now;
+    Discord_Avatar(own, (int)sizeof(own));
+    if (sL.on == 2) {
+        uint8_t p[12 + AVB];
+        if (sL.myId == 0 || !Avatar_RefOk(own)) {
+            return;
+        }
+        memset(p, 0, sizeof(p));
+        put(p, 0, MAGIC);
+        put(p, 1, T_L_AVATAR);
+        put(p, 2, sL.myId);
+        SDL_strlcpy((char *)p + 12, own, AVB);
+        send_to(p, (int)sizeof(p), &sL.owner);
+        return;
+    }
+    {
+        uint8_t p[12 + AV_KEPT * (4 + AVB)];
+        uint32_t ids[AV_KEPT];
+        int count = 0, i;
+
+        av_set(sL.m[0].id, own);
+        for (s = 0; s < LOBBY_SLOTS; s++) { /* those in the places, */
+            if (sL.ids[s] != 0 && av_of(sL.ids[s])[0] != '\0' && count < AV_KEPT) {
+                ids[count++] = sL.ids[s];
+            }
+        }
+        for (e = 0; sL.t.state != 0 && e < sL.t.count && e < TOUR; e++) { /* ... and a bracket's entrants who are no longer in one */
+            for (i = 0; i < count && ids[i] != sL.t.id[e]; i++) {
+            }
+            if (i == count && av_of(sL.t.id[e])[0] != '\0' && count < AV_KEPT) {
+                ids[count++] = sL.t.id[e];
+            }
+        }
+        memset(p, 0, sizeof(p));
+        put(p, 0, MAGIC);
+        put(p, 1, T_L_AVATARS);
+        put(p, 2, (uint32_t)count);
+        for (i = 0; i < count; i++) {
+            memcpy(p + 12 + i * (4 + AVB), &ids[i], 4);
+            SDL_strlcpy((char *)p + 12 + i * (4 + AVB) + 4, av_of(ids[i]), AVB);
+        }
+        for (k = 1; k < LOBBY_SLOTS; k++) {
+            if (sL.m[k].on) {
+                send_to(p, 12 + count * (4 + AVB), &sL.m[k].addr);
+            }
+        }
+    }
+}
+
 /* The owner: a packet of a member. */
 static void owner_packet(const uint8_t *pkt, int n, const struct sockaddr_in *from, uint32_t type) {
     int k;
+    if (type == T_L_AVATAR) { /* a member's picture: taken from the member that has this address and this id, and no other */
+        for (k = 1; n >= 12 + AVB && k < LOBBY_SLOTS; k++) {
+            if (sL.m[k].on && same(from, &sL.m[k].addr) && sL.m[k].id == get(pkt, 2)) {
+                av_packet_one(pkt + 12, sL.m[k].id);
+            }
+        }
+        return;
+    }
     if (type == T_L_HELLO) {
         owner_hello(pkt, n, from);
         return;
@@ -1800,6 +2013,18 @@ static void member_packet(const uint8_t *pkt, int n, const struct sockaddr_in *f
         return;
     }
     sL.heardNs = now_ns();
+    if (type == T_L_AVATARS && n >= 12) { /* everyone's pictures, as the owner has them: this copy's list is the owner's */
+        uint32_t count = get(pkt, 2), i;
+        if (count <= AV_KEPT && (uint32_t)n >= 12 + count * (4 + AVB)) {
+            memset(sAv, 0, sizeof(sAv));
+            for (i = 0; i < count; i++) {
+                uint32_t id;
+                memcpy(&id, pkt + 12 + i * (4 + AVB), 4);
+                av_packet_one(pkt + 12 + i * (4 + AVB) + 4, id);
+            }
+        }
+        return;
+    }
     if (type == T_L_STATE && n >= STATE_BYTES) {
         uint32_t seq = get(pkt, 2), r = get(pkt, 7), o = get(pkt, 8), noteSeq = get(pkt, 9);
         int s, changed = 0;
@@ -1959,6 +2184,7 @@ static void lobby_off(void) {
     if (NetIo_SessionMode() == 0 && !NetIo_SessionStarting()) {
         NetIo_Close();
     }
+    memset(sAv, 0, sizeof(sAv));
     view_update(1);
 }
 
@@ -2039,6 +2265,7 @@ static void result_watch(uint32_t gen) {
 static void timers(void) {
     uint64_t now = now_ns();
     int k;
+    av_tick();
     if (NetIo_SessionMode() != 0) {
         result_watch(sL.on == 1 ? (sL.phase == 1 ? sL.gen : 0) : sL.inGen);
     }
