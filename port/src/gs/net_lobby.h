@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-enum { T_LOBBY_FIRST = 30, T_LOBBY_LAST = 43 }; /* the lobby's packet types (net_lobby.c); a release without lobbies ignores them */
+enum { T_LOBBY_FIRST = 30, T_LOBBY_LAST = 44 }; /* the lobby's packet types (net_lobby.c); a release without lobbies ignores them */
 
 #ifndef __cplusplus
 struct sockaddr_in;
@@ -45,8 +45,14 @@ void Lobby_Tick(void);                    /* in a session, with every look at th
 void Lobby_Pump(void);                    /* outside a session, every blank (game thread): the socket and the timers */
 void Lobby_SessionLeaving(void);          /* Port_NetLeave, before the goodbyes */
 int Lobby_SessionEnded(void);             /* Port_NetSessionEnd: 1 = the lobby goes on with the socket */
-int Lobby_ServesSpectators(void);         /* this copy's session sends the match to the lobby's spectators (its owner) */
+int Lobby_Owns(void);                     /* this copy owns a lobby */
 int Lobby_IsMember(const struct sockaddr_in *from); /* (the owner: one of its members; a member: the owner) */
+/* A lobby's match is watched at its host (the player on the left), and a spectator's greeting carries the match's
+   key, which the owner drew and told the host and each one it sent to watch. */
+uint32_t Lobby_WatchKey(void);            /* the key of the match this copy is in (0: none, or not a lobby's) */
+int Lobby_WatchKeyOk(uint32_t key);       /* this copy hosts a lobby's match and that is its key */
+void Lobby_WatchLeft(void);               /* this copy stopped watching by its own menu: it is not sent back to that match */
+void NetIo_Knock(const struct sockaddr_in *to); /* net.c: knocked at for ten seconds, so that its greeting gets in (a match's spectator) */
 /* The 1v1 lobby (net.c, Port_LobbyPoll) found that the other side is a lobby: become its member. `addrs` the
    owner's addresses ("ip:port", "relay=ip:port", "seen=ip"), from a room code; or the owner's address that answered. */
 void Lobby_JoinFound(const char addrs[][64], int count, const char *code, const char *self);
@@ -61,12 +67,13 @@ void Lobby_Stranger(const uint8_t *pkt, int n, const struct sockaddr_in *from, u
 #define LOBBY_CHAT 32
 #define LOBBY_LOG 6
 #define LOBBY_TOUR 8 /* a tournament's entrants at most (the bracket's leaves) */
+#define LOBBY_MATCHES (LOBBY_TOUR / 2) /* matches on at the same time at most (a first round's) */
 typedef struct PortLobbyView {
     int state;                  /* 0 none, 1 connecting, 2 in the lobby, 3 closed (error says why; Port_LobbyDo(LOBBY_OK) clears it) */
     int owner;                  /* this copy owns the lobby */
     int me;                     /* this copy's place (0, 1 the players, 2..7 the spectators), -1 none yet */
-    int phase;                  /* 0 in the lobby window, 1 a match is on */
-    int inMatch;                /* this copy is in the match */
+    int phase;                  /* 0 no match is on, 1 at least one is (matchCount) */
+    int inMatch;                /* this copy is in a match (playing or watching: myMatch) */
     char code[8];               /* the room code ("" none, or not yet) */
     int port;                   /* the owner's port (by address) */
     int taken[LOBBY_SLOTS], ready[LOBBY_SLOTS], isOwner[LOBBY_SLOTS];
@@ -103,7 +110,9 @@ typedef struct PortLobbyView {
     int tourWin[LOBBY_TOUR - 1];/* its winner, -1 not decided */
     int tourHow[LOBBY_TOUR - 1];/* 1 a bye, 2 a walkover, 3 played */
     int tourCur;                /* the match to play next, or being played; -1 none */
-    int tourOn;                 /* the match being played now, -1 none */
+    int tourOn;                 /* a match being played now (the first of them), -1 none */
+    int tourLive[LOBBY_TOUR - 1];/* each match: it is being played now */
+    int tourCan[LOBBY_TOUR - 1];/* each match: it can be started now (both entrants here and free) */
     int tourChamp;              /* the champion (an entrant), -1 none yet */
     int tourChoose;             /* the match whose winner the owner chooses (its two games disagreed twice), -1 none */
     /* the players' pictures (gs/avatar.c): the reference of the one in each place and of each entrant, "" none */
@@ -112,15 +121,26 @@ typedef struct PortLobbyView {
     int readyCount;             /* places marked ready */
     int entrants;               /* the player places: 2 (versus: 1P, 2P), a tournament's Entrants rule 2..8 */
     int entrantCount;           /* of them taken (a tournament started now has these) */
+    /* the matches that are on, side by side (a versus lobby has one at most): each has a number, its two players
+       (the first hosts it, and its spectators watch it there) and, in a tournament, the bracket's match it is */
+    int matchCount;
+    unsigned matchGen[LOBBY_MATCHES];
+    int matchTour[LOBBY_MATCHES];              /* the bracket's match, -1 a versus match */
+    char matchName[LOBBY_MATCHES][2][LOBBY_NAME];
+    int matchWatchers[LOBBY_MATCHES];
+    unsigned myMatch;           /* the match this copy is in or was sent to, 0 none */
+    int myRole;                 /* ... as what: 1 hosts it, 2 joins it, 3 watches it; 0 none */
 } PortLobbyView;
 
 enum { LOBBY_START = 1, LOBBY_BACK, LOBBY_LEAVE, LOBBY_KICK, LOBBY_MOVE, LOBBY_RULE, LOBBY_READY, LOBBY_OK,
-       LOBBY_TOUR_NEW, LOBBY_TOUR_CALLOFF, LOBBY_TOUR_CHOOSE };
+       LOBBY_TOUR_NEW, LOBBY_TOUR_CALLOFF, LOBBY_TOUR_CHOOSE, LOBBY_TOUR_START, LOBBY_WATCH };
 enum { LOBBY_RULE_BATTLE = 0, LOBBY_RULE_TIME, LOBBY_RULE_SPEED, LOBBY_RULE_ROLLBACK, LOBBY_RULE_DELAY, LOBBY_RULE_MODE, LOBBY_RULE_ENTRANTS };
 
 int Port_LobbyView(PortLobbyView *out);   /* 0: no lobby (state 0) */
-/* START (versus: the match of 1P and 2P; a tournament: its next match, the two put in 1P and 2P), BACK (the owner:
-   the match ends for everyone), LEAVE, KICK a (place), MOVE a b (two places swap), RULE a b (rule a one step: b -1
+/* START (versus: the match of 1P and 2P; a tournament: its next match), TOUR_START a (a tournament's match a; -1:
+   every match that can start now, side by side), WATCH a (anyone: watch the match with the number a, leaving the one
+   being watched; 0: stop watching, back on the lobby's page), BACK (the owner: the match it is in ends for
+   everyone), LEAVE, KICK a (place), MOVE a b (two places swap), RULE a b (rule a one step: b -1
    or +1), READY a (0 / 1), OK (a closed lobby's message was read), TOUR_NEW (a tournament of those in the player
    places, drawn), TOUR_CALLOFF (the tournament that is on ends without a champion), TOUR_CHOOSE a (the owner's choice
    of the winner of the match its games disagreed on twice: side a, 0 or 1). Done at the game's next blank. */

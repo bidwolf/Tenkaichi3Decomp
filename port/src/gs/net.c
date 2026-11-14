@@ -650,7 +650,7 @@ static void sync_check(uint32_t sure, unsigned tick) {
     if (at != 0 && sSyncMine[at / SYNC_EVERY % SYNC_SLOTS].tick == at) {
         sSyncOutTick = at;
         sSyncOutValue = sSyncMine[at / SYNC_EVERY % SYNC_SLOTS].value;
-        if (sMode == 1 || (sMode == 2 && Lobby_ServesSpectators())) {
+        if (sMode == 1) {
             note_put(&sNotesSure, at, sSyncOutValue); /* (what spectators compare with, for the whole match) */
         }
     }
@@ -1043,17 +1043,26 @@ static void spec_setup_send(const struct sockaddr_in *to) {
     net_send(s, sizeof(s), to);
 }
 
+/* A lobby's match: the key a spectator's greeting carries after its flags (0: none). */
+static uint32_t spec_key(const uint8_t *pkt, int n) {
+    uint32_t key = 0;
+    if (n >= 36 + NAME_LEN) {
+        memcpy(&key, pkt + 32 + NAME_LEN, 4);
+    }
+    return key;
+}
+
 /* The host: a spectator's greeting. */
 static void spec_hello(const uint8_t *pkt, int n, const struct sockaddr_in *from) {
-    uint32_t why = sMode == 1 || Lobby_ServesSpectators() ? spec_check(pkt, n) : SPEC_NO_PLAYER;
+    uint32_t why = sMode == 1 ? spec_check(pkt, n) : SPEC_NO_PLAYER;
     uint64_t now = SDL_GetTicksNS();
     int i, free = -1;
 
     if (why == 0 && !Port_NetSession()) {
         why = SPEC_NO_PLAIN;
     }
-    if (why == 0 && Lobby_Active() && !Lobby_IsMember(from)) {
-        why = SPEC_NO_LOBBY; /* (a lobby's match is watched by its members, through its owner) */
+    if (why == 0 && Lobby_Active() && !Lobby_WatchKeyOk(spec_key(pkt, n))) {
+        why = SPEC_NO_LOBBY; /* (a lobby's match is watched by its members: the owner gave them this match's key) */
     }
     if (why != 0) {
         spec_no(from, why);
@@ -1268,7 +1277,7 @@ static void spec_pump(void) {
     uint64_t now = SDL_GetTicksNS();
     int i, k, budget = SPEC_BURST;
 
-    if (!(sMode == 1 || Lobby_ServesSpectators()) || now - last < 16000000ull) {
+    if (sMode != 1 || now - last < 16000000ull) {
         return;
     }
     if (now - last > 1000000000ull) { /* (this copy was away a while, loading: the spectators' silence says nothing) */
@@ -1277,9 +1286,7 @@ static void spec_pump(void) {
         }
     }
     last = now;
-    if (sMode != 3) { /* (a lobby's owner that watches passes on what its host sent it) */
-        spec_log_update();
-    }
+    spec_log_update();
     if (sFromLobby) {
         watch_service(); /* (a room code: spectators the service has told of) */
     }
@@ -1431,8 +1438,12 @@ static void spec_take(const uint8_t *pkt, int n) {
 
 /* A packet of the spectators' kind. Returns 1 if it was for this copy. */
 static int spec_packet(const uint8_t *pkt, int n, const struct sockaddr_in *from, uint32_t type) {
-    int serving = sMode == 1 || Lobby_ServesSpectators(); /* (a lobby's owner passes the match on, whatever its part) */
-    if (sMode == 3 && (same_addr(from, &sPeer) || !serving)) {
+    int serving = sMode == 1; /* (a match is watched at its host, a lobby's too) */
+    if (sMode == 3) {
+        if (!sSpecSetup && sJoinAlt.sin_port != 0 && same_addr(from, &sJoinAlt) && (type == T_SPEC_SETUP || type == T_SPEC_WAIT)) {
+            sPeer = *from; /* (a lobby's match: the host answered at its other address) */
+            memset(&sJoinAlt, 0, sizeof(sJoinAlt));
+        }
         if (!same_addr(from, &sPeer)) {
             return 0; /* (a spectator listens to the host only) */
         }
@@ -1470,7 +1481,7 @@ static int spec_packet(const uint8_t *pkt, int n, const struct sockaddr_in *from
         }
         return 1;
     }
-    if (type == T_SPEC_HELLO && Lobby_Active() && !Lobby_IsMember(from)) {
+    if (type == T_SPEC_HELLO && Lobby_Owns() && !Lobby_IsMember(from)) {
         Lobby_Stranger(pkt, n, from, type); /* (a lobby's: told it is one, to join it) */
         return 1;
     }
@@ -1478,7 +1489,7 @@ static int spec_packet(const uint8_t *pkt, int n, const struct sockaddr_in *from
         spec_hello(pkt, n, from);
         return 1;
     }
-    if (type == T_SPEC_LIST && (sMode == 2 || (sMode == 1 && Lobby_Active())) && sConnected && same_addr(from, &sPeer) && n >= 12) {
+    if (type == T_SPEC_LIST && sMode == 2 && sConnected && same_addr(from, &sPeer) && n >= 12) {
         uint32_t count;
         int i;
         int was = sWatchCount;
@@ -1534,7 +1545,7 @@ static int spec_packet(const uint8_t *pkt, int n, const struct sockaddr_in *from
 
 /* The spectator's greeting, to `to` (the session's and the lobby's). */
 static void spec_hello_send(const struct sockaddr_in *to, int asking) {
-    uint32_t hello[8 + NAME_LEN / 4] = {MAGIC, T_SPEC_HELLO, SPEC_VERSION, NET_VERSION, 0, 0, 0};
+    uint32_t hello[9 + NAME_LEN / 4] = {MAGIC, T_SPEC_HELLO, SPEC_VERSION, NET_VERSION, 0, 0, 0};
     unsigned long long fp;
     if (fprint_mine(&fp)) {
         hello[4] = FP_MARK;
@@ -1543,6 +1554,7 @@ static void spec_hello_send(const struct sockaddr_in *to, int asking) {
     }
     memcpy(&hello[7], name_sent(), NAME_LEN);
     hello[7 + NAME_LEN / 4] = (uint32_t)asking;
+    hello[8 + NAME_LEN / 4] = Lobby_WatchKey(); /* (a lobby's match: its key, which the owner gave; else 0) */
     net_send(hello, sizeof(hello), to);
 }
 
@@ -1596,7 +1608,7 @@ static int receive(void) {
             got |= spec_packet(pkt, n, &from, type) && sMode == 3;
             continue;
         }
-        if (type == T_HELLO && Lobby_ServesSpectators() && !same_addr(&from, &sPeer) && !Lobby_IsMember(&from)) {
+        if (type == T_HELLO && Lobby_Owns() && !same_addr(&from, &sPeer) && !Lobby_IsMember(&from)) {
             Lobby_Stranger(pkt, n, &from, type); /* (a lobby's owner in its match: someone knocking as for a match of two) */
             continue;
         }
@@ -1795,7 +1807,7 @@ static int receive(void) {
             }
         }
     }
-    if (sMode == 1 || Lobby_ServesSpectators()) {
+    if (sMode == 1) {
         spec_pump();
     }
     Lobby_Tick();
@@ -2059,6 +2071,9 @@ static void net_start(int role, const char *host, const char *join) {
         if (sMode == 3) {
             if (now - last > 200000000ull) {
                 spec_hello_send(&sPeer, 0);
+                if (sJoinAlt.sin_port != 0) {
+                    spec_hello_send(&sJoinAlt, 0); /* (a lobby's match: the host's other address) */
+                }
                 last = now;
             }
             receive();
@@ -2231,12 +2246,11 @@ static void net_start(int role, const char *host, const char *join) {
         sRollMax = 0;
         sStartedMs = now_ms();
         spec_ack_send(0);
-        sSpecOpen = Lobby_ServesSpectators(); /* (a lobby's owner that watches: it passes the match on from here) */
+        sSpecOpen = 0;
         return;
     }
-    /* (the host: from here its choices are final, and spectators are let in; a lobby's owner that joined passes the
-       match on to the lobby's spectators) */
-    sSpecOpen = sMode == 1 || Lobby_ServesSpectators();
+    /* (the host: from here its choices are final, and spectators are let in) */
+    sSpecOpen = sMode == 1;
     fprintf(stderr, "bt3: net: connected%s; input delay %d blanks, %s\n", sFromLobby && Port_LobbyRelayed() ? " through the relay" : sFromLobby ? " directly" : "", sDelay,
             sRollMax > 0 ? "rollback" : "waiting for each other");
     fprintf(stderr, "bt3: net: game speed %d%%\n", rules_speed());
@@ -2769,6 +2783,7 @@ static void spec_tick(unsigned tick) {
     if (sSpecLeaveAsked) {
         sSpecLeaveAsked = 0;
         sSpecNoticed = 1;
+        Lobby_WatchLeft(); /* (a lobby's: this copy is left on the lobby's page, not sent to the match again) */
         fprintf(stderr, "bt3: net: spectating: stopped watching at blank %u\n", tick);
         Port_NetLeave();
     }
@@ -4183,6 +4198,28 @@ const char *NetIo_MyName(void) {
 
 void NetIo_WatchService(void) {
     watch_service();
+}
+
+void NetIo_Knock(const struct sockaddr_in *to) {
+    uint32_t punch[2] = {MAGIC, T_PUNCH};
+    uint64_t now = SDL_GetTicksNS();
+    int k, pick = 0;
+    if (sSock < 0 || to->sin_port == 0) {
+        return;
+    }
+    for (k = 0; k < WATCH_KNOCK && !(sKnockUntil[k] != 0 && same_addr(&sKnock[k], to)); k++) {
+    }
+    if (k == WATCH_KNOCK) { /* (a new one: in the first free place, or the oldest; knocked at once) */
+        for (k = 0; k < WATCH_KNOCK; k++) {
+            if (sKnockUntil[k] < sKnockUntil[pick]) {
+                pick = k;
+            }
+        }
+        k = pick;
+        sKnock[k] = *to;
+        net_send(punch, sizeof(punch), to);
+    }
+    sKnockUntil[k] = now + 10000000000ull;
 }
 
 uint32_t NetIo_Rules(int type, int dp, int time, int speed) {

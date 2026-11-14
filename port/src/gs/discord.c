@@ -526,6 +526,16 @@ static void presence_now(Presence *p) {
     memset(p, 0, sizeof(*p));
     if (Port_LobbyView(&v) && v.state == 2) {
         const char *one = v.name[0], *two = v.name[1];
+        if (v.matchCount > 0) { /* (the match this copy is in, else the first of those that are on) */
+            int at = 0;
+            for (i = 0; i < v.matchCount; i++) {
+                if (v.matchGen[i] == v.myMatch) {
+                    at = i;
+                }
+            }
+            one = v.matchName[at][0];
+            two = v.matchName[at][1];
+        }
         for (i = 0; i < LOBBY_SLOTS; i++) {
             p->size += v.taken[i] != 0;
         }
