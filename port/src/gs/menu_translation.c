@@ -24,7 +24,7 @@
 #endif
 
 enum { TR_MAX_FILE = 1024 * 1024, TR_MAX_ROWS = 640, TR_MAX_GROUPS = 160 };
-enum { TR_PORT_TEXT_COUNT = 18, TR_PORT_TEXT_MAX = 1024, TR_PORT_MAX_FILE = 1024 * 1024 };
+enum { TR_PORT_TEXT_COUNT = 34, TR_PORT_TEXT_MAX = 1024, TR_PORT_MAX_FILE = 1024 * 1024 };
 /* The online menus' lines (ids "tbo/..."): looked up by their English text, as the menu draws them (MenuTranslation_Line).
    Any number up to TR_LINES_MAX; a table is made once per load and kept (the game's thread may be reading the last). */
 enum { TR_LINES_MAX = 2048, TR_LINES_HASH = 4096 };
@@ -50,6 +50,22 @@ static const struct { const char *id, *original; } kPortText[TR_PORT_TEXT_COUNT]
     {PORT_TEXT_UPDATE_READY, "Update {version} is ready. F1 > Restart now."},
     {PORT_TEXT_UPDATE_DONE, "Updated to {version}."},
     {PORT_TEXT_UPDATE_ONLINE_OFF, "An update is being installed: online play is off until the game restarts (F1 > Restart now)."},
+    {PORT_TEXT_UPD_P_AVAILABLE, "Update {version} available."},
+    {PORT_TEXT_UPD_P_CURRENT, "Installed: {version}"},
+    {PORT_TEXT_UPD_P_DOWNLOADING, "Downloading {version}: {percent}%. You can go on playing."},
+    {PORT_TEXT_UPD_P_CHECKING, "Checking the download of {version}..."},
+    {PORT_TEXT_UPD_P_READY, "Update {version} is downloaded and verified."},
+    {PORT_TEXT_UPD_P_INSTALLING, "Installing {version}..."},
+    {PORT_TEXT_UPD_P_FAILED, "The update to {version} was not installed:"},
+    {PORT_TEXT_UPD_B_NOW, "Update now"},
+    {PORT_TEXT_UPD_B_LATER, "Later"},
+    {PORT_TEXT_UPD_B_RESTART, "Restart now"},
+    {PORT_TEXT_UPD_B_RETRY, "Try again"},
+    {PORT_TEXT_UPD_B_NOTES, "What's new"},
+    {PORT_TEXT_UPD_B_NOTES_HIDE, "Hide what's new"},
+    {PORT_TEXT_UPD_B_PAGE, "Release page"},
+    {PORT_TEXT_UPD_NOTES_NONE, "(The release has no notes.)"},
+    {PORT_TEXT_UPD_BUSY, "Finish the online session first."},
 };
 typedef struct TrPortCatalog {
     char text[TR_PORT_TEXT_COUNT][TR_PORT_TEXT_MAX];
@@ -541,13 +557,44 @@ static int tr_locale_name(const char *name, char *locale, size_t cap) {
     locale[first] = 0;
     return 1;
 }
+static int sTrFollow; /* tr_copy_one: the catalogs being copied follow the release's (see there) */
+/* 1: both files exist and hold the same bytes */
+static int tr_same_file(const char *a, const char *b) {
+    FILE *fa = fopen(a, "rb"), *fb = fopen(b, "rb");
+    int same = fa != NULL && fb != NULL;
+    while (same) {
+        int ca = fgetc(fa), cb = fgetc(fb);
+        if (ca != cb) same = 0;
+        if (ca == EOF || cb == EOF) break;
+    }
+    if (fa != NULL) fclose(fa);
+    if (fb != NULL) fclose(fb);
+    return same;
+}
 static int tr_copy_one(const char *source, const char *destination) {
     FILE *in, *out;
     struct stat st;
     char tmp[1300], buf[8192];
     size_t n;
     int ok = 1;
-    if (stat(destination, &st) == 0) return 1;
+    if (stat(destination, &st) == 0) {
+        /* A catalog that follows the release (sTrFollow): beside each copy, `<name>.shipped` is the release's file it
+           was made from. A release with another catalog replaces the copy (its new lines would never show
+           otherwise: an update does not write the game data's folder); a copy the player changed since is kept as
+           `<name>.mine`. A copy from before this rule has no `.shipped` and is replaced so too. */
+        char stamp[1300], mine[1300];
+        int edited;
+        if (!sTrFollow) return 1;
+        snprintf(stamp, sizeof(stamp), "%s.shipped", destination);
+        snprintf(mine, sizeof(mine), "%s.mine", destination);
+        if (tr_same_file(source, stamp) || tr_same_file(source, destination)) {
+            if (!tr_same_file(source, stamp)) { sTrFollow = 0; unlink(stamp); tr_copy_one(source, stamp); sTrFollow = 1; }
+            return 1;
+        }
+        edited = stat(stamp, &st) == 0 && !tr_same_file(destination, stamp);
+        if (edited) { unlink(mine); rename(destination, mine); } else unlink(destination);
+        unlink(stamp);
+    }
     in = fopen(source, "rb");
     if (in == NULL) return 0;
     snprintf(tmp, sizeof(tmp), "%s.%ld.part", destination, (long)getpid());
@@ -559,6 +606,11 @@ static int tr_copy_one(const char *source, const char *destination) {
     if (fclose(out) != 0) ok = 0;
     if (ok) ok = rename(tmp, destination) == 0;
     if (!ok) unlink(tmp);
+    if (ok && sTrFollow) {
+        char stamp[1300];
+        snprintf(stamp, sizeof(stamp), "%s.shipped", destination);
+        sTrFollow = 0; unlink(stamp); tr_copy_one(source, stamp); sTrFollow = 1;
+    }
     return ok;
 }
 static void tr_copy_catalogs(const char *root, const char *kind, const char *destinationDir) {
@@ -643,7 +695,9 @@ static void tr_copy_all(const char *outDir, const char *labelsDir) {
 #else
         mkdir(catalogDir, 0755);
 #endif
+        sTrFollow = 1; /* (ui, port: the release's catalog replaces an older copy; labels are the player's to edit) */
         tr_copy_catalogs(src, extraCatalogs[i], catalogDir);
+        sTrFollow = 0;
     }
 }
 static int tr_translation_dir(const char *outDir, char *dir, size_t size) {

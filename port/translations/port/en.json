@@ -78,6 +78,70 @@
     "update/online_off": {
       "original": "An update is being installed: online play is off until the game restarts (F1 > Restart now).",
       "text": "An update is being installed: online play is off until the game restarts (F1 > Restart now)."
+    },
+    "update/panel_available": {
+      "original": "Update {version} available.",
+      "text": "Update {version} available."
+    },
+    "update/panel_current": {
+      "original": "Installed: {version}",
+      "text": "Installed: {version}"
+    },
+    "update/panel_downloading": {
+      "original": "Downloading {version}: {percent}%. You can go on playing.",
+      "text": "Downloading {version}: {percent}%. You can go on playing."
+    },
+    "update/panel_checking": {
+      "original": "Checking the download of {version}...",
+      "text": "Checking the download of {version}..."
+    },
+    "update/panel_ready": {
+      "original": "Update {version} is downloaded and verified.",
+      "text": "Update {version} is downloaded and verified."
+    },
+    "update/panel_installing": {
+      "original": "Installing {version}...",
+      "text": "Installing {version}..."
+    },
+    "update/panel_failed": {
+      "original": "The update to {version} was not installed:",
+      "text": "The update to {version} was not installed:"
+    },
+    "update/btn_now": {
+      "original": "Update now",
+      "text": "Update now"
+    },
+    "update/btn_later": {
+      "original": "Later",
+      "text": "Later"
+    },
+    "update/btn_restart": {
+      "original": "Restart now",
+      "text": "Restart now"
+    },
+    "update/btn_retry": {
+      "original": "Try again",
+      "text": "Try again"
+    },
+    "update/btn_notes": {
+      "original": "What's new",
+      "text": "What's new"
+    },
+    "update/btn_notes_hide": {
+      "original": "Hide what's new",
+      "text": "Hide what's new"
+    },
+    "update/btn_page": {
+      "original": "Release page",
+      "text": "Release page"
+    },
+    "update/notes_none": {
+      "original": "(The release has no notes.)",
+      "text": "(The release has no notes.)"
+    },
+    "update/busy": {
+      "original": "Finish the online session first.",
+      "text": "Finish the online session first."
     }
   }
 }

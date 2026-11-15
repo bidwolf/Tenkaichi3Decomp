@@ -15,8 +15,8 @@
  */
 #ifndef PORT_UPDATE_KEY_H
 #define PORT_UPDATE_KEY_H
-/* PLACEHOLDER (zeros): REPLACE with the output of `update_key.py generate` before the first signed release. */
-#define PORT_UPDATE_KEY_RELEASE "e6d94b546355ddbb34f549df298cb9bcbeda034d29f4b182f77e5a19d177dcad"
+/* This fork's own key (2026-11-15): its private half is the repository secret UPDATE_SIGNING_KEY of the fork. */
+#define PORT_UPDATE_KEY_RELEASE "4f5c66e34c73e054ad96af09593876dad9fffdf14ee6d40e44445dff9356af4d"
 
 /* (Testing only: a developer's build made with BT3_UPDATE_TEST_KEY=<hex> in its environment checks with that key
    instead, so that archives signed with a throw-away key can be tried; port/tools/undefined.py writes it into the

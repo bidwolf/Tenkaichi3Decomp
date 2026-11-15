@@ -2,7 +2,7 @@
   "schema_version": 1,
   "labels_version": 1,
   "translation_version": 1,
-  "labels_count": 541,
+  "labels_count": 557,
   "locale": "pt",
   "name": "Português (Onfly)",
   "order": 2,
@@ -95,6 +95,86 @@
     "update/online_off": {
       "original": "An update is being installed: online play is off until the game restarts (F1 > Restart now).",
       "text": "Uma atualização está sendo instalada: o online fica desligado até o jogo reiniciar (F1 > Reiniciar agora).",
+      "note": "shown by the PC port"
+    },
+    "update/panel_available": {
+      "original": "Update {version} available.",
+      "text": "Atualização {version} disponível.",
+      "note": "shown by the PC port"
+    },
+    "update/panel_current": {
+      "original": "Installed: {version}",
+      "text": "Instalada: {version}",
+      "note": "shown by the PC port"
+    },
+    "update/panel_downloading": {
+      "original": "Downloading {version}: {percent}%. You can go on playing.",
+      "text": "Baixando a {version}: {percent}%. Pode continuar jogando.",
+      "note": "shown by the PC port"
+    },
+    "update/panel_checking": {
+      "original": "Checking the download of {version}...",
+      "text": "Conferindo o download da {version}...",
+      "note": "shown by the PC port"
+    },
+    "update/panel_ready": {
+      "original": "Update {version} is downloaded and verified.",
+      "text": "Atualização {version} baixada e conferida.",
+      "note": "shown by the PC port"
+    },
+    "update/panel_installing": {
+      "original": "Installing {version}...",
+      "text": "Instalando a {version}...",
+      "note": "shown by the PC port"
+    },
+    "update/panel_failed": {
+      "original": "The update to {version} was not installed:",
+      "text": "A atualização {version} não foi instalada:",
+      "note": "shown by the PC port"
+    },
+    "update/btn_now": {
+      "original": "Update now",
+      "text": "Atualizar agora",
+      "note": "shown by the PC port"
+    },
+    "update/btn_later": {
+      "original": "Later",
+      "text": "Depois",
+      "note": "shown by the PC port"
+    },
+    "update/btn_restart": {
+      "original": "Restart now",
+      "text": "Reiniciar agora",
+      "note": "shown by the PC port"
+    },
+    "update/btn_retry": {
+      "original": "Try again",
+      "text": "Tentar de novo",
+      "note": "shown by the PC port"
+    },
+    "update/btn_notes": {
+      "original": "What's new",
+      "text": "Novidades",
+      "note": "shown by the PC port"
+    },
+    "update/btn_notes_hide": {
+      "original": "Hide what's new",
+      "text": "Esconder novidades",
+      "note": "shown by the PC port"
+    },
+    "update/btn_page": {
+      "original": "Release page",
+      "text": "Página da versão",
+      "note": "shown by the PC port"
+    },
+    "update/notes_none": {
+      "original": "(The release has no notes.)",
+      "text": "(Esta versão não tem notas.)",
+      "note": "shown by the PC port"
+    },
+    "update/busy": {
+      "original": "Finish the online session first.",
+      "text": "Termine a sessão online primeiro.",
       "note": "shown by the PC port"
     },
     "tbo/47144fb5": {
