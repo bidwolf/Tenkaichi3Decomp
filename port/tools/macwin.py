@@ -2,7 +2,7 @@
 (port/tools/macwin/macwin.cpp, an LLVM pass plugin built here on first use with Homebrew's LLVM) to an .ll file in
 place. See the top of macwin.cpp."""
 import os, pathlib, re, subprocess
-from toolchain import ROOT, llvm
+from toolchain import ROOT, llvm, ANDROID, ANDROID_WINDOW
 
 SRC = ROOT / "port/tools/macwin/macwin.cpp"
 PLUGIN = ROOT / "port/build/macwin.dylib"
@@ -23,9 +23,11 @@ def plugin():
 WRAP = ["Progress_Main"]
 ABS = {"D_3BE71C": 0x3BE71C}
 
-SIGS = ROOT / "port/build/mac_sigs.txt"  # every function the program defines, with its kinds (the top of macwin.cpp)
+SIGS = ROOT / ("port/build/android_sigs.txt" if ANDROID else "port/build/mac_sigs.txt")  # every function the program defines, with its kinds (the top of macwin.cpp)
 
 def opt(ll, passes, opts):
+    if ANDROID:
+        opts = [f"-bt3-fixed={ANDROID_WINDOW:#x}"] + opts
     return subprocess.run([llvm("opt"), "-load-pass-plugin", str(plugin()), "-passes=" + passes] + opts, capture_output=True, text=True)
 
 def defs(ll):

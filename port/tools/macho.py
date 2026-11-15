@@ -12,6 +12,16 @@ LABEL = re.compile(r"^([A-Za-z_][\w.$]*):", re.M)
 GLOBL = re.compile(r"^(\s*\.globl\s+)([A-Za-z_][\w.$]*)", re.M)
 POINTER = re.compile(r"^(\s*\.long\s+)([A-Za-z_][\w.$]*)\s*(?:([+-])\s*(\w+))?\s*$", re.M)
 
+def elf(text, window):
+    """The same tables for the Android build: ELF as they are, each pointer a game address, i.e. `Symbol - window`
+    (the program is linked for an address in the window, toolchain.ANDROID_WINDOW, and the linker does the sum)."""
+    def pointer(m):
+        k = f" {m.group(3)} {m.group(4)}" if m.group(3) else ""
+        if m.group(2) in ABS:
+            return f"{m.group(1)}{ABS[m.group(2)]:#x}{k}"
+        return f"{m.group(1)}{m.group(2)} - {window:#x}{k}"
+    return POINTER.sub(pointer, text)
+
 def asm(text):
     text = re.sub(r"^(\s*)\.section\s+\.(data|bss)\s*$", r"\1.\2", text, flags=re.M)
     text = LABEL.sub(r"_\1:", text)

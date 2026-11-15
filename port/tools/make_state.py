@@ -13,7 +13,7 @@ Usage: port/tools/make_state.py  (run by link.py after a successful link; BT3_CC
 import bisect, itertools, pathlib, re, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from toolchain import OBJ, DATA, EXE, MAC
+from toolchain import OBJ, DATA, EXE, MAC, ANDROID
 
 PORT_STATE = {"headless", "mathf_pc", "plat_file", "plat_libm", "plat_mc", "plat_mem", "plat_sndstate", "plat_stub", "plat_sys", "softfloat_ps2",
               "vu0_a", "vu0_b", "gs_marker"}
@@ -57,6 +57,25 @@ def mac_map(text):
         (ranges if is_game(files.get(int(m.group(3)), "")) else others).append((a - window, a - window + size))
     return ranges, others, "".join(f"   0x{v:x} {k}\n" for k, v in marks.items())
 
+def lld_map(text, window):
+    """lld's map (the Android build): "VMA LMA Size Align" then, by indentation, an output section, an input section
+    ("object:(section)") or a symbol. Addresses become game addresses (offsets in the window, toolchain.py)."""
+    ranges, others, marks, out = [], [], {}, None
+    for l in text.splitlines()[1:]:
+        m = re.match(r"\s*([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+(\d+) (\s*)(.*)$", l)
+        if not m:
+            continue
+        addr, size, depth, what = int(m.group(1), 16), int(m.group(3), 16), len(m.group(5)), m.group(6)
+        if depth == 0:
+            out = what
+        elif depth == 8 and out is not None and out.startswith(WRITABLE):
+            obj = re.sub(r":\([^()]*\)$", "", what)
+            if size and addr and what.endswith(")"):
+                (ranges if is_game(obj) else others).append((addr - window, addr - window + size))
+        elif depth == 16 and what in ("gPortResim", "gPortVBlanks"):
+            marks[what] = addr - window
+    return ranges, others, "".join(f"   0x{v:x} {k}\n" for k, v in marks.items())
+
 def linux_map(text):
     """GNU ld's map: input sections, each with its object."""
     text = text[text.index("Linker script and memory map"):]
@@ -92,6 +111,9 @@ def main():
     text = pathlib.Path(str(EXE) + ".map").read_text(errors="replace")
     if MAC:
         ranges, others, text = mac_map(text)
+    elif ANDROID:
+        from toolchain import ANDROID_WINDOW
+        ranges, others, text = lld_map(text, ANDROID_WINDOW)
     else:
         ranges, others, text = linux_map(text)
     ranges.sort()

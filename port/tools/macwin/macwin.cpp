@@ -72,6 +72,10 @@ cl::opt<bool> PortModule("bt3-port", cl::desc("a port source, not the game's"), 
 // to a function this module only declares is made in the definition's terms (-bt3-sigs: that list): a pointer
 // argument for an integer parameter becomes its game address, an integer for a pointer becomes W + it, the result
 // likewise, and the call is a fixed-argument one when the definition is.
+// Android (port/tools/toolchain.py, ANDROID_WINDOW): the window is at an address fixed when the program is linked, not
+// one counted from the program's header. Constants are then W as a number: data keeps `symbol - W`, which the ELF
+// linker resolves to the game address (the program is linked for W + 0x20000000 and loaded there, never moved).
+cl::opt<uint64_t> Fixed("bt3-fixed", cl::desc("the window's address, when it is fixed at link time"), cl::init(0));
 cl::opt<std::string> Defs("bt3-defs", cl::desc("write this module's function definitions to FILE, change nothing"), cl::init(""));
 cl::opt<std::string> Sigs("bt3-sigs", cl::desc("the program's function definitions (FILE from -bt3-defs)"), cl::init(""));
 
@@ -95,6 +99,9 @@ struct Window {
           Host(PointerType::get(Ctx, 0)), Game(PointerType::get(Ctx, GAME)) {}
 
     Constant *window() {
+        if (!W && Fixed != 0) {
+            W = ConstantExpr::getIntToPtr(ConstantInt::get(I64, Fixed), Host);
+        }
         if (!W) {
             GlobalVariable *mh = M.getGlobalVariable("_mh_execute_header");
             if (!mh) {

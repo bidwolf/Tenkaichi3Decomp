@@ -26,7 +26,7 @@ static uint32_t sHeapNext = HEAP_FIRST, sHeapEnd = HEAP_END;
 
 /* The 64-bit builds (the game's pointers 4 bytes wide, ptr32.py) keep the port's blocks for the game in a region of
    their own (Port_LowAlloc); the 32-bit build uses the C library's. */
-#if defined(__x86_64__) || defined(__APPLE__)
+#if defined(__x86_64__) || defined(PORT_WINDOW)
 #define PORT_LOW_REGION 1
 #else
 #define PORT_LOW_REGION 0
@@ -176,8 +176,8 @@ int __wrap_main(int argc, char **argv) {
     return sResult;
 }
 
-#elif defined(__APPLE__)
-/* -------------------------------------------------------------------------------------------------------- macOS
+#elif defined(PORT_WINDOW)
+/* ---------------------------------------------------------------------------------------------- macOS, Android
    The same regions, in the window of the game's addresses (port_addr.h): each at W + its PS2 address. The program
    itself starts 0x20000000 into the window (port/tools/link.py), its globals are game addresses like the rest.
      - pages are 16 KB on Apple Silicon: a region starts on the page that holds its first address;
@@ -187,11 +187,29 @@ int __wrap_main(int argc, char **argv) {
        thread.
    The entry point of the program is __wrap_main (link.py: ld64 has no --wrap; the game's main() is called by
    name). */
+#include <sys/mman.h>
+#include <unistd.h>
+
+#ifdef __ANDROID__
+/* Android: the window's address is fixed (port_addr.h). The program that loads this one (port/android/run.c) has
+   reserved the window's whole 4 GB and put this program 0x20000000 into it, so every region is simply placed
+   (MAP_FIXED, over the reservation). Nothing to restart: the address is the linked one or the program is not loaded. */
+void *Port_Window = (void *)PORT_WINDOW;
+
+static void window_aligned(void) {
+}
+
+static void *map_at(uint32_t addr, uint32_t size) {
+    uintptr_t page = 16384, at = (PORT_WINDOW + addr) & ~(page - 1); /* (16 KB: right for 4 KB and 16 KB phones) */
+    size_t n = (size_t)((PORT_WINDOW + addr + size - at + page - 1) & ~(page - 1));
+    void *p = mmap((void *)at, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+
+    return p == (void *)at ? p : NULL;
+}
+#else
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 #include <spawn.h>
-#include <sys/mman.h>
-#include <unistd.h>
 
 /* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function). */
 void *Port_Window = (char *)&_mh_execute_header - 0x20000000u;
@@ -235,6 +253,7 @@ static void *map_at(uint32_t addr, uint32_t size) {
     }
     return p;
 }
+#endif
 
 static void map(uint32_t addr, uint32_t size, const char *what) {
     if (map_at(addr, size) == NULL) {
@@ -256,7 +275,12 @@ PORT_HOST static char **sArgv = NULL;
 
 /* fn() with the stack pointer at `top`. The game runs on the main thread (Cocoa, and so SDL's windows and events,
    work there only), on a stack in the window. */
-__asm__(".text\n.globl _Port_CallOnStack\n.p2align 2\n_Port_CallOnStack:\n"
+#ifdef __ANDROID__
+#define CALL_ON_STACK "Port_CallOnStack"
+#else
+#define CALL_ON_STACK "_Port_CallOnStack"
+#endif
+__asm__(".text\n.globl " CALL_ON_STACK "\n.p2align 2\n" CALL_ON_STACK ":\n"
         "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    mov sp, x1\n    blr x0\n"
         "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n");
 
@@ -605,13 +629,13 @@ __attribute__((constructor)) static void Port_MapMemory(void) {
         ExitProcess(4);
     }
 #endif
-#if defined(__APPLE__)
+#if defined(PORT_WINDOW)
     window_aligned();
 #endif
     gPortStage = "reading the game's programs from gamedata";
     Port_LoadGameData();
     gPortStage = "reserving the game's memory";
-#if defined(__APPLE__)
+#if defined(PORT_WINDOW)
     map(STACK_BASE, STACK_SIZE, "the game thread's stack");
     low_region_take(); /* the region of Port_LowAlloc, now (see there) */
 #elif defined(__x86_64__) && !defined(_WIN32)
@@ -661,7 +685,7 @@ static void low_region_take(void) {
             exit(2);
         }
         sLowCommitted = sLowArena;
-#elif defined(__APPLE__)
+#elif defined(PORT_WINDOW)
         sLowArena = map_at(LOW_ARENA_BASE, LOW_ARENA_SIZE); /* (pages are only taken as they are first used) */
         if (sLowArena == NULL) {
             fprintf(stderr, "bt3: the window has no room for the port's own blocks\n");

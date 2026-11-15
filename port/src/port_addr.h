@@ -13,9 +13,16 @@
 #define PORT_ADDR_H
 #include <stdint.h>
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include <mach-o/ldsyms.h> /* _mh_execute_header: the program's first byte */
 #define PORT_WINDOW ((uintptr_t)&_mh_execute_header - 0x20000000u)
+#elif defined(__ANDROID__)
+/* Android: the window is at a fixed address, 64 GB (port/tools/toolchain.py, ANDROID_WINDOW); the program is linked
+   for it and loaded there (port/android/run.c). See docs/port/android_plan.md. */
+#define PORT_WINDOW ((uintptr_t)0x1000000000ull)
+#endif
+
+#ifdef PORT_WINDOW
 static inline void *Port_Ptr(uint32_t addr) {
     return addr != 0 ? (void *)(PORT_WINDOW + addr) : (void *)0;
 }

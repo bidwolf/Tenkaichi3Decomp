@@ -151,7 +151,59 @@ __attribute__((constructor(101))) static void crash_init(void) {
     AddVectoredExceptionHandler(1, on_crash);
 }
 #else
+#ifdef __ANDROID__
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+/* Android has no backtrace() at the system version the build is made for: the report gives the registers, and pc
+   and lr are looked up in the build's map (minus nothing: the program is loaded at its linked address). */
+static int backtrace(void **frames, int max) {
+    (void)frames;
+    (void)max;
+    return 0;
+}
+static void *sWhere[2]; /* pc and lr of the crash */
+static uintptr_t sFrame;  /* x29 of the crash: the chain of saved (x29, x30) pairs is walked for the callers */
+static void where(int fd, const char *label, uintptr_t addr) {
+    static const char hex[] = "0123456789abcdef";
+    Dl_info info;
+    char num[16];
+    int i;
+    if (addr == 0 || dladdr((void *)addr, &info) == 0 || info.dli_fname == NULL) {
+        return;
+    }
+    if (write(fd, label, strlen(label)) < 0 || write(fd, info.dli_fname, strlen(info.dli_fname)) < 0) {
+    }
+    if (info.dli_sname != NULL && (write(fd, " ", 1) < 0 || write(fd, info.dli_sname, strlen(info.dli_sname)) < 0)) {
+    }
+    for (i = 0; i < 16; i++) {
+        num[i] = hex[(addr - (uintptr_t)info.dli_fbase) >> (60 - 4 * i) & 15];
+    }
+    if (write(fd, " (library + 0x", 14) < 0 || write(fd, num, 16) < 0 || write(fd, ")\n", 2) < 0) {
+    }
+}
+/* library, nearest exported function and offset of pc, lr and each caller (dladdr; no unwinder on Android here) */
+static void backtrace_symbols_fd(void **frames, int n, int fd) {
+    uintptr_t fp = sFrame;
+    int k;
+    (void)frames;
+    (void)n;
+    where(fd, "pc: ", (uintptr_t)sWhere[0]);
+    where(fd, "lr: ", (uintptr_t)sWhere[1]);
+    for (k = 0; k < 32 && fp != 0 && (fp & 15) == 0; k++) {
+        uintptr_t next = ((uintptr_t *)fp)[0];
+        where(fd, "    ", ((uintptr_t *)fp)[1]);
+        if (next <= fp) {
+            break;
+        }
+        fp = next;
+    }
+}
+#else
 #include <execinfo.h>
+#endif
 #include <fcntl.h>
 #include <signal.h>
 #include <string.h>
@@ -164,8 +216,20 @@ static void put(int fd, const char *s) {
     }
 }
 
+#include "port_addr.h"
+#ifdef PORT_WINDOW
 #ifdef __APPLE__
-/* macOS: the address that was reached, and the same as a game address (port_addr.h): a game address used without
+#define CTX_PC(c) ((c)->uc_mcontext->__ss.__pc)
+#define CTX_LR(c) ((c)->uc_mcontext->__ss.__lr)
+#define CTX_SP(c) ((c)->uc_mcontext->__ss.__sp)
+#define CTX_X(c, r) ((c)->uc_mcontext->__ss.__x[r])
+#else /* (Linux's arm64 names: Android) */
+#define CTX_PC(c) ((c)->uc_mcontext.pc)
+#define CTX_LR(c) ((c)->uc_mcontext.regs[30])
+#define CTX_SP(c) ((c)->uc_mcontext.sp)
+#define CTX_X(c, r) ((c)->uc_mcontext.regs[r])
+#endif
+/* macOS and Android: the address that was reached, and the same as a game address (port_addr.h): a game address used without
    its conversion shows here as an address below 4 GB, which macOS never maps. */
 #include "port_addr.h"
 #include <sys/ucontext.h>
@@ -201,7 +265,7 @@ static void on_crash(int sig) {
             put(out, "\n");
             put(out, Port_DataSummary());
         }
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
         put(out, "\naddress ");
         put_hex(out, (unsigned long long)(uintptr_t)sFault);
         put(out, " (game address ");
@@ -210,17 +274,22 @@ static void on_crash(int sig) {
         if (sCtx != NULL) { /* the registers when it happened: pc is the instruction (the backtrace starts above it) */
             int r;
             put(out, "\npc ");
-            put_hex(out, sCtx->uc_mcontext->__ss.__pc);
+            put_hex(out, CTX_PC(sCtx));
+#ifdef __ANDROID__
+            sWhere[0] = (void *)(uintptr_t)CTX_PC(sCtx);
+            sWhere[1] = (void *)(uintptr_t)CTX_LR(sCtx);
+            sFrame = (uintptr_t)CTX_X(sCtx, 29);
+#endif
             put(out, " lr ");
-            put_hex(out, sCtx->uc_mcontext->__ss.__lr);
+            put_hex(out, CTX_LR(sCtx));
             put(out, " sp ");
-            put_hex(out, sCtx->uc_mcontext->__ss.__sp);
+            put_hex(out, CTX_SP(sCtx));
             for (r = 0; r < 29; r++) {
                 put(out, r % 4 == 0 ? "\n" : " ");
                 put(out, "x");
                 put(out, (const char[]){(char)('0' + r / 10), (char)('0' + r % 10), 0});
                 put(out, " ");
-                put_hex(out, sCtx->uc_mcontext->__ss.__x[r]);
+                put_hex(out, CTX_X(sCtx, r));
             }
         }
 #endif
@@ -235,7 +304,7 @@ static void on_crash(int sig) {
     raise(sig);
 }
 
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
 static void on_crash_info(int sig, siginfo_t *si, void *ctx) {
     sCtx = (ucontext_t *)ctx;
     sFault = si->si_addr;
@@ -248,7 +317,7 @@ __attribute__((constructor)) static void crash_init(void) {
     unsigned i;
 
     for (i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) {
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_sigaction = on_crash_info;

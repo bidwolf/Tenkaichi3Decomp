@@ -648,6 +648,9 @@ void Discord_Pump(void) {
     static Uint64 viewed;
     Presence now;
 
+#ifdef __ANDROID__ /* no Discord client to talk to through a local socket on a phone */
+    started = -1;
+#endif
     if (started < 0 || gPortResim) {
         return;
     }

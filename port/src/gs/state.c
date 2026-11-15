@@ -74,14 +74,14 @@ static void regions_init(void) {
             int marks = 0;
             while (sRegions < MAX_REGIONS - 2 && fscanf(fp, "%llx %llx", &a, &size) == 2) {
                 if (a < 2) {
-#ifdef __APPLE__ /* (the list holds game addresses: offsets in the window, port_addr.h) */
+#ifdef PORT_WINDOW /* (the list holds game addresses: offsets in the window, port_addr.h) */
                     marks += size == Port_Addr(a == 0 ? (const void *)&gPortResim : (const void *)&gPortVBlanks);
 #else
                     marks += (uintptr_t)size == (a == 0 ? (uintptr_t)&gPortResim : (uintptr_t)&gPortVBlanks);
 #endif
                     continue;
                 }
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
                 sRegion[sRegions].p = (const uint8_t *)Port_Ptr((uint32_t)a);
 #else
                 sRegion[sRegions].p = (const uint8_t *)(uintptr_t)a;
@@ -206,8 +206,8 @@ void Port_StateLog(unsigned vblank, const void *fight, unsigned fightSize) {
  *                    one's checksum, restore, run the n again and compare each. What online play does when an
  *                    input arrives late: several frames are undone and replayed.
  * ------------------------------------------------------------------------------------------------------------- */
-#if defined(__x86_64__) || defined(__APPLE__)
-#ifdef __APPLE__
+#if defined(__x86_64__) || defined(PORT_WINDOW)
+#ifdef PORT_WINDOW
 /* macOS: as on Windows, the registers are kept with a setjmp (the C library's, without the signal mask: macOS has
    no ucontext functions on arm64) and the copy back runs on another stack through the port's stack switch. */
 #include <setjmp.h>
@@ -230,7 +230,7 @@ extern void Port_PadPlaySeek(long pos);
 typedef struct Snapshot {
     struct { uint8_t *at; size_t n; uint8_t *copy; size_t cap; } part[MAX_PARTS];
     int parts;
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
     jmp_buf jb;
 #elif defined(_WIN32)
     void *jb[5];
@@ -281,7 +281,7 @@ static int __attribute__((noinline)) state_save(Snapshot *s) {
     s->padPos = Port_PadPlayPos();
     s->loaded = 0;
     part_save(s, sp, (size_t)(top - sp)); /* the stack last: this frame's own contents as they are now */
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
     if (_setjmp(s->jb) != 0) {
         return 1;
     }
@@ -298,7 +298,7 @@ static int __attribute__((noinline)) state_save(Snapshot *s) {
 }
 
 static Snapshot *sLoading;
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32) && !defined(PORT_WINDOW)
 static ucontext_t sLoaderCtx;
 #endif
 
@@ -310,7 +310,7 @@ static void loader(void) {
     }
     Port_PadPlaySeek(s->padPos);
     s->loaded = 1;
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
     _longjmp(s->jb, 1);
 #elif defined(_WIN32)
     __builtin_longjmp(s->jb, 1);
@@ -328,7 +328,7 @@ static void state_load(Snapshot *s) {
     }
     roll_forget();
     sLoading = s;
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(PORT_WINDOW)
     Port_CallOnStack(loader, stack + (1 << 20) - 64); /* (does not come back: the loader continues at the save) */
 #else
     getcontext(&sLoaderCtx);
@@ -371,7 +371,7 @@ static uint64_t parts_hash(void) {
  * A read() into a read-only page does not fault, it fails: whatever lets the system write file data straight
  * into the game's memory calls Port_StateTouch first.
  * ------------------------------------------------------------------------------------------------------------- */
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
 #define PG 16384u /* the page size of Apple Silicon: what mprotect works in */
 #else
 #define PG 4096u
@@ -401,7 +401,7 @@ static uint32_t sRollId;
 static int tracked_part(const uint8_t *p) {
     int t;
     for (t = 0; t < sTracks; t++) {
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
         if (p >= sTrack[t].base && p < sTrack[t].base + PG) { /* (the heap starts inside its first tracked page) */
 #else
         if (p == sTrack[t].base) {
@@ -428,7 +428,7 @@ static inline void dirty_note(uint32_t g) {
 #include <signal.h>
 #include <sys/mman.h>
 static struct sigaction sOldSegv;
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
 static struct sigaction sOldBus; /* macOS reports a write to a read-only page as SIGBUS */
 #endif
 
@@ -445,7 +445,7 @@ static void on_write_fault(int sig, siginfo_t *si, void *uc) {
         }
     }
     /* not ours: to whoever handled it before, or to the default (the write is tried again and ends the program) */
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
     struct sigaction *old = sig == SIGBUS ? &sOldBus : &sOldSegv;
     if (old->sa_flags & SA_SIGINFO) {
         old->sa_sigaction(sig, si, uc);
@@ -514,7 +514,7 @@ static void track_start(void) {
         regions_init();
     }
     Port_HeapRegion(&heap, &heapSize);
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
     /* the heap starts inside a 16 KB page (0x003BE000); the mapping starts on that page, and so does the tracking */
     heapSize += (uint32_t)((uintptr_t)heap & (PG - 1));
     heap -= (uintptr_t)heap & (PG - 1);
@@ -554,7 +554,7 @@ static void track_start(void) {
         sa.sa_flags = SA_SIGINFO | SA_NODEFER;
         sigemptyset(&sa.sa_mask);
         sigaction(SIGSEGV, &sa, &sOldSegv);
-#ifdef __APPLE__
+#ifdef PORT_WINDOW
         sigaction(SIGBUS, &sa, &sOldBus);
 #endif
         mprotect(sTrack[0].base, (size_t)sTrack[0].pages * PG, PROT_READ);
