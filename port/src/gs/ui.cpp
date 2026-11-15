@@ -12,6 +12,7 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "imgui_impl_opengl3.h"
+#include "touch_pad.h"
 #include "ui.h"
 #include "namefont.h"
 #include "../port_release.h"
@@ -3159,6 +3160,7 @@ static bool frame_build(void) {
         sBanner[0] = '\0';
     }
     bool banner = sReady && sBanner[0] != '\0';
+    bool touch = sReady && PortTouch_Visible() && !sOpen && !sQuit; // the controller on the screen (touch_pad.c)
     Uint64 now = SDL_GetTicks();
     bool saving = save_icon_on(now) && sReady && gUiPresentW > 0 && gUiPresentH > 0;
     bool watched = sReady && Port_NetWatchers() > 0 && !sOpen;  // a player's: who watches the match
@@ -3167,7 +3169,7 @@ static bool frame_build(void) {
     sBuilt = false;
     bool upd = updLine[0] != '\0';
     UiA11y_Frame(sReady && sOpen && !sQuit, !sQuit); // (the screen reader in the windows: ui_a11y.cpp)
-    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving && !watched && !upd && !mods)) {
+    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving && !watched && !upd && !mods && !touch)) {
         return false;
     }
     if (sPadHold && sCapKind != 2) { // a binding was taken: the controller works the window again once nothing is held
@@ -3255,6 +3257,32 @@ static bool frame_build(void) {
                 }
             }
             dl->AddText(font, size, ImVec2(x, y), IM_COL32(255, 255, 255, 255), text);
+        }
+    }
+    if (touch) { // the controller on the screen: translucent rings with their names, brighter while held
+        ImGuiIO &io = ImGui::GetIO();
+        ImDrawList *dl = ImGui::GetForegroundDrawList();
+        ImFont *font = ImGui::GetFont();
+        const TouchPadButton *b;
+        int n = PortTouch_Buttons(&b);
+        float H = io.DisplaySize.y, W = io.DisplaySize.x, ox, oy, sx, sy;
+        for (int i = 0; i < n; i++) {
+            ImVec2 c(b[i].x >= 0 ? b[i].x * H : W + b[i].x * H, b[i].y * H);
+            float r = b[i].r * H, size = r * (strlen(b[i].label) > 2 ? 0.42f : 0.8f);
+            ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, b[i].label);
+            dl->AddCircleFilled(c, r, b[i].held ? IM_COL32(255, 255, 255, 110) : IM_COL32(20, 30, 60, 70), 32);
+            dl->AddCircle(c, r, IM_COL32(255, 255, 255, b[i].held ? 230 : 120), 32, H * 0.004f);
+            dl->AddText(font, size, ImVec2(c.x - extent.x * 0.5f, c.y - extent.y * 0.5f), IM_COL32(255, 255, 255, b[i].held ? 255 : 170), b[i].label);
+        }
+        if (PortTouch_Stick(&ox, &oy, &sx, &sy)) {
+            ImVec2 o(ox * W, oy * H), d((sx - ox) * W, (sy - oy) * H);
+            float reach = 0.14f * H, len = sqrtf(d.x * d.x + d.y * d.y);
+            if (len > reach) {
+                d.x *= reach / len;
+                d.y *= reach / len;
+            }
+            dl->AddCircle(o, reach, IM_COL32(255, 255, 255, 110), 40, H * 0.004f);
+            dl->AddCircleFilled(ImVec2(o.x + d.x, o.y + d.y), reach * 0.45f, IM_COL32(255, 255, 255, 120), 32);
         }
     }
     if (banner) { // the start of an online match (Port_UiBanner): in the middle, large, outlined

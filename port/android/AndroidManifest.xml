@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Android app of the port: SDL's activity (org.libsdl.app.SDLActivity, from SDL3's release) with the game's
+     files copied out at start (RinhaActivity). Built by port/android/build_apk.py; see docs/port/android_plan.md. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.rinhaonline.bt3">
+    <uses-feature android:glEsVersion="0x00020000" />
+    <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <application android:label="Rinha Online" android:icon="@mipmap/ic_launcher" android:allowBackup="false"
+        android:hardwareAccelerated="true" android:extractNativeLibs="true" android:isGame="true"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        <activity android:name=".RinhaActivity" android:label="Rinha Online" android:exported="true"
+            android:launchMode="singleInstance" android:screenOrientation="sensorLandscape"
+            android:alwaysRetainTaskState="true" android:preferMinimalPostProcessing="true"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

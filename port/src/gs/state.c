@@ -17,6 +17,9 @@
  * The numbers of two runs of the SAME program can be compared. Not those of different builds: the state holds
  * addresses of functions and variables, which differ from build to build.
  */
+#ifndef _WIN32
+#include "../port_exe.h"
+#endif
 #include <SDL3/SDL.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h> /* _NSGetExecutablePath */
@@ -54,7 +57,7 @@ static void regions_init(void) {
     uint32_t cap = sizeof(exe) - 1;
     long n = _NSGetExecutablePath(exe, &cap) == 0 ? (long)strlen(exe) : -1;
 #else
-    long n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    long n = (long)Port_SelfExe(exe, sizeof(exe) - 1);
 #endif
 
     sRegions = 0;

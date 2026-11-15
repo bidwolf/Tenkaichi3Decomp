@@ -1084,6 +1084,10 @@ int Port_PadRead(int socket, unsigned char *data) {
     if (socket == 0) {
         btn |= script_buttons();
     }
+    if (socket == 0 && !gPortInputCapture && !sSwallow) { /* the controller on the screen (touch_pad.c): player 1's */
+        extern unsigned PortTouch_Read(unsigned char *lx, unsigned char *ly);
+        btn |= PortTouch_Read(&lx, &ly);
+    }
     if (socket == 0 && getenv("BT3_STICK_TEST") != NULL) { /* the numbers, once: what was read, what was passed, what the game has */
         static const char *const dirs[5] = {"-", "up", "down", "left", "right"};
         extern unsigned char gPad[]; /* the game's (include/sys/pad.h): 0x130 left x, y, 0x138 right x, y, 0x148 held */

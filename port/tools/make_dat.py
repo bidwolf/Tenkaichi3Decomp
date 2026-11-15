@@ -38,6 +38,24 @@ def mac_placed(exe):
             out[k] = (lo, sizes[0])
     return out
 
+def android_placed(exe):
+    """Android: lld's map, "VMA LMA Size Align" and, indented by 8, "object:(section)". Game addresses (window offsets)."""
+    placed = {}
+    for l in open(str(exe) + ".map"):
+        m = re.match(r"\s*([0-9a-f]+)\s+[0-9a-f]+\s+([0-9a-f]+)\s+\d+ {9}(\S*obj_data\w*/(\S+)\.o):\(\.data\)\s*$", l)
+        if m and int(m.group(2), 16):
+            placed[m.group(4)] = (int(m.group(1), 16) - toolchain.ANDROID_WINDOW, int(m.group(2), 16))
+    return placed
+
+def android_sections(exe):
+    """Android: (address, file offset, size) of each section with contents, from llvm-readelf."""
+    secs = []
+    for l in subprocess.run([toolchain.llvm("llvm-readelf"), "-S", "-W", str(exe)], capture_output=True, text=True).stdout.splitlines():
+        m = re.match(r"\s*\[\s*\d+\]\s+\S+\s+PROGBITS\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)", l)
+        if m:
+            secs.append((int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)))
+    return secs
+
 def mac_sections(exe):
     """macOS: (address, file offset, size) of each section with contents, from otool -l."""
     secs, cur = [], {}
@@ -63,8 +81,8 @@ def main():
             where[p[0]] = (int(p[1]), int(p[2], 16))
         elif len(p) == 2 and p[0] == "checksum":
             checksum = int(p[1], 16)
-    placed = mac_placed(exe) if toolchain.MAC else {}
-    for l in open(str(exe) + ".map") if not toolchain.MAC else ():
+    placed = mac_placed(exe) if toolchain.MAC else android_placed(exe) if toolchain.ANDROID else {}
+    for l in open(str(exe) + ".map") if not toolchain.WINDOW else ():
         m = re.match(r"^\s*\.data\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+\S*obj_data\w*/(\S+)\.o\s*$", l)
         if m and int(m.group(2), 16):
             placed[m.group(3)] = (int(m.group(1), 16), int(m.group(2), 16))
@@ -89,13 +107,13 @@ def main():
         if not off <= size < off + 16:  # (a Windows object's section is padded to its 16-byte alignment)
             raise SystemExit(f"{name}: {off} bytes in port/data, {size} in the program")
     # the mark that this program does not work without its list (gPortDataStripped, plat_mem.c)
-    secs = mac_sections(exe) if toolchain.MAC else []
-    lines = [] if toolchain.MAC else subprocess.run([PREFIX + "objdump", "-h", str(exe)], capture_output=True, text=True).stdout.splitlines()
+    secs = mac_sections(exe) if toolchain.MAC else android_sections(exe) if toolchain.ANDROID else []
+    lines = [] if toolchain.WINDOW else subprocess.run([PREFIX + "objdump", "-h", str(exe)], capture_output=True, text=True).stdout.splitlines()
     for k, l in enumerate(lines):
         m = re.match(r"\s*\d+\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)", l)
         if m and k + 1 < len(lines) and "CONTENTS" in lines[k + 1]:
             secs.append((int(m.group(3), 16), int(m.group(5), 16), int(m.group(2), 16)))
-    flag = next((int(l.split()[0], 16) for l in subprocess.run([toolchain.llvm("llvm-nm") if toolchain.MAC else PREFIX + "nm", str(exe)],
+    flag = next((int(l.split()[0], 16) for l in subprocess.run([toolchain.llvm("llvm-nm") if toolchain.WINDOW else PREFIX + "nm", str(exe)],
                                                               capture_output=True, text=True).stdout.splitlines()
                  if l.endswith(" _gPortDataStripped" if toolchain.MAC else " gPortDataStripped")), None)
     off = next((o + flag - va for va, o, size in secs if flag is not None and va <= flag < va + size), None)

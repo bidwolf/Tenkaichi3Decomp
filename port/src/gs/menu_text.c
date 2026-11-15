@@ -21,6 +21,9 @@
  * Nothing here is game state: the game is only read (the glyph table Font_UploadTexture hands over), and what
  * this file keeps is on the renderer's side (not saved by a rollback, not in the desync checksum). Texture-pack
  * replacements take precedence. */
+#ifndef _WIN32
+#include "../port_exe.h"
+#endif
 #include "menu_text.h"
 #include "menu_labels.h"
 #include "ui_text_extract.h" /* UiText_EuropeanOnStartup */
@@ -409,7 +412,7 @@ static int font_dir_by_program(char *out, size_t size) {
     uint32_t cap = sizeof(exe) - 1;
     long n = _NSGetExecutablePath(exe, &cap) == 0 ? (long)strlen(exe) : -1;
 #else
-    long n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    long n = (long)Port_SelfExe(exe, sizeof(exe) - 1);
 #endif
     if (n <= 0 || n >= (long)sizeof(exe) - 1) { return 0; }
     exe[n] = '\0';

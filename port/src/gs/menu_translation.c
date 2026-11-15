@@ -1,4 +1,7 @@
 /* Runtime catalogs for the menu and battle texture labels. */
+#ifndef _WIN32
+#include "../port_exe.h"
+#endif
 #include "menu_translation.h"
 #include "menu_text.h"
 #include "ui_text_extract.h"
@@ -664,7 +667,7 @@ static int tr_bundled_dir(char *out, size_t size) {
 #elif defined(__APPLE__)
     { uint32_t cap = sizeof(exe) - 1; n = _NSGetExecutablePath(exe, &cap) == 0 ? (long)strlen(exe) : -1; }
 #else
-    n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    n = (long)Port_SelfExe(exe, sizeof(exe) - 1);
 #endif
     if (n <= 0 || n >= (long)sizeof(exe) - 1) return 0;
     exe[n] = 0;

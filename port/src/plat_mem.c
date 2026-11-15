@@ -11,6 +11,9 @@
  *                           written (0 at start: "transfer finished").
  *   0x70000000              the 16 KB scratchpad.
  */
+#ifndef _WIN32
+#include "port_exe.h"
+#endif
 #include "port_host.h"
 #include "port_addr.h"
 #include <stdint.h>
@@ -293,6 +296,16 @@ int __wrap_main(int argc, char **argv) {
     sArgv = argv;
     sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
     gPortStage = "the game is running (on its stack in the window)";
+#ifdef __ANDROID__
+    /* The app (port/android/app_main.c) calls this on a thread it made WITH the window's stack region as its stack:
+       Android's Java runtime only accepts calls from a thread whose stack pointer is inside the stack the thread
+       was made with (anything else is a stack overflow to it), and SDL calls Java for the window. Already on the
+       game's stack then: no switch (which would run over this very frame). */
+    if ((uint8_t *)&argc >= (uint8_t *)Port_Ptr(STACK_BASE) && (uint8_t *)&argc < sGameStackTop) {
+        game_main();
+        return sResult;
+    }
+#endif
     Port_CallOnStack(game_main, sGameStackTop);
     return sResult;
 }
@@ -420,7 +433,7 @@ static void Port_LoadGameData(void) {
     uint32_t exeSize = sizeof(exe) - 1;
     long n = _NSGetExecutablePath(exe, &exeSize) == 0 ? (long)strlen(exe) : -1;
 #else
-    long n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    long n = (long)Port_SelfExe(exe, sizeof(exe) - 1);
 #endif
 
     if (n <= 0 || n >= (long)sizeof(exe) - 1) {

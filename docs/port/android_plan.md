@@ -2,11 +2,14 @@
 
 The Android port is EXPERIMENTAL: built on a Mac, run from a shell on the emulator, no app yet.
 
-Status 2026-11-15: the arm64 build (`BT3_CC=android64`) links and runs the attract-demo fight headless to the end
-("battle finished") on the Android 15 arm64 emulator, and its fight state (`BT3_HASH`: health, positions, clock,
-random generator, and their checksum) equals the macOS build's on all 4428 vertical blanks. The macOS build made from
-the same sources gives the same fight as before the change (4428 of 4428). Nothing is drawn, no sound, no app, no
-real phone yet. This file is the plan and the record of what was checked; update it as steps land.
+Status 2026-11-15: the arm64 build (`BT3_CC=android64`) runs the attract-demo fight headless to the end on the
+Android 15 arm64 emulator with the same fight state as the macOS build on all 4428 vertical blanks (`BT3_HASH`), and
+the macOS build made from the same sources gives the same fight as before (4428 of 4428). An APK
+(`port/android/build_apk.py`) starts on that emulator: the game draws through SDL_GPU's Vulkan back end (the
+emulator's software Vulkan: slow), reads the game data from the app's folder, opens sound (AAudio), and answers the
+controller drawn on the screen (language screen chosen with it, the opening logos play). Not checked: a real phone,
+a fight in the app, a controller, sound heard, the F1 window by touch, anything online. This file is the plan and the
+record of what was checked; update it as steps land.
 
 Target phone: the user's Samsung S25 (arm64, Vulkan).
 
@@ -66,14 +69,36 @@ limit the log.
 The Android build shares `port/build/gen` with the Mac build (`shaders.h`, `port_version.h`, `stubs.c`): build the Mac
 game again after an Android build before trusting those files.
 
+## The app
+
+- `port/android/build_apk.py` packs it without Gradle (aapt2, d8, zipalign, apksigner): `libbt3.so` (the game),
+  `libmain.so` (`app_main.c`), `libSDL3.so`, SDL's Java classes with `RinhaActivity`, and under `assets/files` what
+  the game keeps next to its program (`.mem`, `.dat`, fonts, translations, the online screens' art). It refuses a game
+  built with the disc's tables: build with `BT3_SKELETON=1`, as the PC releases are, so the APK holds no game data.
+- The app's folder is `Android/data/com.rinhaonline.bt3/files` on the shared storage: the assets are copied there at
+  the first start of each installed version, the game runs with it as its current directory (`gamedata/`, `saves/`,
+  settings, `bt3_log.txt`), and `BT3_EXE` names it as the program's place (`port/src/port_exe.h`). Without
+  `gamedata` there the app says where to put it and stops.
+- **The game's thread is made with the window's stack region as its stack** (`pthread_attr_setstack`, `app_main.c`;
+  `__wrap_main` then calls the game without switching). Switching to that stack inside SDL's thread, as the other
+  builds do, made every call into Java fail without a word: Android's runtime takes a stack pointer outside the
+  stack a thread was made with for a stack overflow (seen as "Could not fetch native window").
+- Landscape only (`SDL_HINT_ORIENTATIONS`: SDL lets a resizable window turn otherwise), full screen.
+- The controller on the screen: `port/src/gs/touch_pad.c` (touches to player 1's pad, a stick planted where the left
+  thumb lands), drawn by `ui.cpp`; its F1 button opens the settings window. Shown from the first touch on.
+- Signed with `~/.bt3-fork-keys/android.keystore` (made 2026-11-15, "CN=Rinha Online"; never in the repository). An
+  update must be signed with the same key or Android refuses to install it over the old one.
+
 ## Steps
 
-1. **Headless on the emulator, same fight as the other builds.** Done (above).
-2. **An app with picture and sound.** Gradle project with SDL's `SDLActivity`; the native library does what `run.c`
-   does (in an app the process is forked from the zygote with much already mapped: check 64 GB is free there);
-   SDL_GPU on Vulkan; `gs_gl.c` (desktop OpenGL: 60 `gl*` stubs today) left out; the title screen on the S25.
-3. **Controller, then touch** for the F1 window and the lobby screens.
-4. **Game data**: made on a computer from each player's own disc and copied to the phone; where the app looks for it.
+1. **Headless on the emulator, same fight as the other builds.** Done.
+2. **An app with picture and sound.** Starts on the emulator (above). Left: the S25, a fight, speed, sound heard;
+   `gs_gl.c` (desktop OpenGL: 60 `gl*` stubs) left out of the build; 64 GB free in an app process was true on the
+   emulator only.
+3. **Controller, then touch.** A first controller on the screen exists; the F1 window and the lobby screens by touch,
+   and a Bluetooth controller, are not checked.
+4. **Game data**: made on a computer from each player's own disc and copied into the app's folder (`adb push`, or a
+   file manager over USB); 68 thousand files, slow to copy. A single archive the app unpacks would be kinder.
 5. **Online**: a lobby between the phone and a Mac, through the relay.
 
 ## Not done, not checked

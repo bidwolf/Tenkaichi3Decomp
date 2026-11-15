@@ -1114,6 +1114,7 @@ static void vk_frame_end(void) {
             Ui_Toggle();
             continue;
         }
+        { extern int PortTouch_Event(const SDL_Event *ev); if (PortTouch_Event(&ev)) { Ui_Toggle(); continue; } } /* touch_pad.c: the controller on the screen */
         if (Ui_Event(&ev)) { /* the settings window is open and used it (Esc closes it) */
             continue;
         }
