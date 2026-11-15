@@ -29,6 +29,23 @@ typedef struct MenuTranslationOption {
 #define PORT_TEXT_UPDATE_READY "update/ready"
 #define PORT_TEXT_UPDATE_DONE "update/done"
 #define PORT_TEXT_UPDATE_ONLINE_OFF "update/online_off"
+/* ... and the update's part of the settings window (gs/ui.cpp, update_panel): its lines and buttons. */
+#define PORT_TEXT_UPD_P_AVAILABLE "update/panel_available"
+#define PORT_TEXT_UPD_P_CURRENT "update/panel_current"
+#define PORT_TEXT_UPD_P_DOWNLOADING "update/panel_downloading"
+#define PORT_TEXT_UPD_P_CHECKING "update/panel_checking"
+#define PORT_TEXT_UPD_P_READY "update/panel_ready"
+#define PORT_TEXT_UPD_P_INSTALLING "update/panel_installing"
+#define PORT_TEXT_UPD_P_FAILED "update/panel_failed"
+#define PORT_TEXT_UPD_B_NOW "update/btn_now"
+#define PORT_TEXT_UPD_B_LATER "update/btn_later"
+#define PORT_TEXT_UPD_B_RESTART "update/btn_restart"
+#define PORT_TEXT_UPD_B_RETRY "update/btn_retry"
+#define PORT_TEXT_UPD_B_NOTES "update/btn_notes"
+#define PORT_TEXT_UPD_B_NOTES_HIDE "update/btn_notes_hide"
+#define PORT_TEXT_UPD_B_PAGE "update/btn_page"
+#define PORT_TEXT_UPD_NOTES_NONE "update/notes_none"
+#define PORT_TEXT_UPD_BUSY "update/busy"
 
 /* Copies bundled label and port catalogs without replacing local edits, then loads
    BT3_MENU_LANG or the saved menu_lang setting (English if neither is set). */

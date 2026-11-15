@@ -5024,3 +5024,33 @@ again" and the second try connected.
 
 **Not tried**: more than ten copies, a full bracket of sixteen, eight matches at once, the lobby's page scrolled by a
 pad, everything listed as not tried above.
+
+## Updates the fork installs itself, and the notes as a page (2026-11-15)
+
+Asked by the user: the game should know of a new version, suggest it and show a changelog that looks like one.
+Most of it was there ("Automatic updates" above); what the fork lacked:
+
+- **A key of its own.** `port/src/update_key.h` holds the fork's public key; the private half is the repository
+  secret `UPDATE_SIGNING_KEY` (and a file on the keeper's machine, outside the repository). Games built from here on
+  install the fork's signed releases. A game of 0.1.39.7 has the project's key in it: it says a release exists and
+  cannot install it, so 0.1.40.1 is installed by hand once.
+- **The notes as a page** (`notes_draw`, ui.cpp): GitHub's Markdown drawn with titles (a rule under `#` and `##`),
+  bullets nested by their indent, a paragraph's or bullet's bold opening on a brighter line of its own, links as
+  their text, a pull request's address as `#12`, GitHub's "Full Changelog" line left out. Tables and pictures show
+  as text. The notes are open from the start; "What's new" hides them.
+- **The panel in the menus' language**: its lines and buttons are port catalog lines (`update/panel_*`,
+  `update/btn_*`), Portuguese in `pt.json`. The tooltips and the reasons an update cannot be installed stay English.
+- **The port's catalogs follow the release** (menu_translation.c, `tr_copy_one`): the copies in the game data's
+  folder (`translations/ui`, `translations/port`) were made once and never replaced, and an update does not write
+  that folder, so a release's new lines never reached a game that was updated. Now `<name>.shipped` beside each copy
+  is the release's file it came from; a release with another catalog replaces the copy, and a copy the player
+  changed is kept as `<name>.mine`. Label catalogs (the player's to edit) are as before.
+- `PORT_RELEASE` is 140 (the tag v0.1.40 was made without raising it). A release's notes are kept in
+  `docs/releases/<number>.md` and put on the release by hand (the workflow's own are GitHub's list of pull requests).
+
+Checked on the Mac, a build numbered 0.1.40 asking a stand-in (`BT3_UPDATE_API=file://<folder>`) that offers
+0.1.40.1 with the notes of `docs/releases/0.1.40.1.md`: the panel in Portuguese and the notes as a page, from the
+window's picture (`BT3_UI_SHOT`); the catalog copy replaced and stamped.
+Not checked: `port/tests/update/run.sh` (it finds no SDL3 for the system's compiler on this Mac; the files it
+tests were not changed), a download and an install with the fork's key (the stand-in had no archive), the signing step of the
+workflow, Windows and Linux.

@@ -1514,10 +1514,11 @@ static int sUpdCheck = -1;   // the setting; -1 not read yet
 static bool sUpdAsked;       // the check was started (or decided against)
 static Uint64 sUpdSince;     // when the game was first ready (the check waits a few seconds after it)
 static bool sUpdLater;       // "Later": no line over the menus for the rest of this run
-static bool sUpdNotes;       // "What's new" is open
+static bool sUpdNotes = true; // the release's notes are shown ("What's new" hides them)
 static bool sUpdTold;        // the result of the last start's update was put over the picture
 static char sUpdWhy[256];    // Restart now could not be done: why
 static void set_notice(const char *text, Uint64 ms);
+static const char *upd_text(const char *id, const char *english);
 
 // {version} and {percent} of a port catalog line put in (the English when the language has none)
 static void upd_fill(char *out, size_t size, const char *id, const char *english, const char *version, int percent) {
@@ -1554,7 +1555,7 @@ static bool upd_online(void) { // an online session or a lobby is on: it is neve
 static void upd_restart(void) {
     sUpdWhy[0] = '\0';
     if (upd_online()) {
-        SDL_strlcpy(sUpdWhy, "Finish the online session first.", sizeof(sUpdWhy));
+        SDL_strlcpy(sUpdWhy, upd_text(PORT_TEXT_UPD_BUSY, "Finish the online session first."), sizeof(sUpdWhy));
         return;
     }
     Update_Install(); // (in a thread: update_tick starts the new version when it is done)
@@ -1634,16 +1635,202 @@ static void update_line(char *out, size_t size) {
     }
 }
 
-// The top of the settings window: what there is to update, and the buttons.
+// A line of the update's panel in the menus' language (the English when the catalog has none).
+static const char *upd_text(const char *id, const char *english) {
+    const char *line = MenuTranslation_PortText(id);
+    return line != NULL && line[0] != '\0' ? line : english;
+}
+
+// A button of the panel: the catalog's word, and an ID that does not change with the language.
+static bool upd_button(const char *id, const char *english, const char *key) {
+    char label[160];
+    SDL_snprintf(label, sizeof(label), "%s###%s", upd_text(id, english), key);
+    return ImGui::Button(label);
+}
+
+// One line of the notes without its marks: **bold**, `code` and [text](address) leave their text, an address of
+// one of the repository's pull requests or issues becomes "#12". 1 if the whole line was bold.
+static bool notes_plain(const char *in, size_t len, char *out, size_t size) {
+    size_t n = 0, bold = 0, plain = 0;
+    bool on = false;
+
+    for (size_t i = 0; i < len && n + 1 < size; i++) {
+        if (in[i] == '*' && i + 1 < len && in[i + 1] == '*') {
+            on = !on;
+            i++;
+        } else if (in[i] == '`') {
+        } else if (in[i] == '[') { // [text](address)
+            size_t close = i + 1, end;
+            while (close < len && in[close] != ']') {
+                close++;
+            }
+            if (close + 1 < len && in[close + 1] == '(') {
+                for (end = close + 2; end < len && in[end] != ')'; end++) {
+                }
+                for (size_t k = i + 1; k < close && n + 1 < size; k++) {
+                    out[n++] = in[k];
+                }
+                i = end < len ? end : len - 1;
+            } else {
+                out[n++] = in[i];
+            }
+        } else if (len - i > 19 && SDL_strncmp(in + i, "https://github.com/", 19) == 0) {
+            size_t end = i, num = 0;
+            while (end < len && in[end] != ' ' && in[end] != ')') {
+                end++;
+            }
+            for (size_t k = end; k > i && in[k - 1] >= '0' && in[k - 1] <= '9'; k--) {
+                num = k - 1;
+            }
+            if (num > i + 6 && (SDL_strncmp(in + num - 6, "/pull/", 6) == 0 || (num > i + 8 && SDL_strncmp(in + num - 8, "/issues/", 8) == 0))) {
+                out[n++] = '#';
+                for (size_t k = num; k < end && n + 1 < size; k++) {
+                    out[n++] = in[k];
+                }
+            } else {
+                for (size_t k = i; k < end && n + 1 < size; k++) {
+                    out[n++] = in[k];
+                }
+            }
+            i = end - 1;
+        } else {
+            out[n++] = in[i];
+            if (in[i] != ' ') {
+                (on ? bold : plain)++;
+            }
+        }
+    }
+    out[n] = '\0';
+    return bold > 0 && plain == 0;
+}
+
+// A paragraph or a bullet's text. One that begins in bold ("**Sixteen places:** the lobby...") has that beginning
+// on a line of its own, brighter, and the rest under it; a line all in bold is brighter.
+static void notes_text(const char *t, size_t tl, char *line, size_t size) {
+    const ImVec4 bright(1.0f, 1.0f, 1.0f, 1.0f), soft(0.76f, 0.79f, 0.84f, 1.0f);
+    size_t close = 0;
+
+    if (tl > 4 && t[0] == '*' && t[1] == '*') {
+        for (size_t i = 2; i + 1 < tl; i++) {
+            if (t[i] == '*' && t[i + 1] == '*') {
+                close = i + 2;
+                break;
+            }
+        }
+    }
+    while (close > 0 && close < tl && t[close] == ' ') {
+        close++;
+    }
+    if (close > 0 && close < tl) {
+        float x = ImGui::GetCursorPosX();
+        ImGui::BeginGroup();
+        notes_plain(t, close, line, size);
+        ImGui::PushStyleColor(ImGuiCol_Text, bright);
+        ImGui::TextWrapped("%s", line);
+        ImGui::PopStyleColor();
+        notes_plain(t + close, tl - close, line, size);
+        ImGui::SetCursorPosX(x);
+        ImGui::PushStyleColor(ImGuiCol_Text, soft);
+        ImGui::TextWrapped("%s", line);
+        ImGui::PopStyleColor();
+        ImGui::EndGroup();
+    } else {
+        bool bold = notes_plain(t, tl, line, size);
+        ImGui::PushStyleColor(ImGuiCol_Text, bold ? bright : soft);
+        ImGui::TextWrapped("%s", line);
+        ImGui::PopStyleColor();
+    }
+}
+
+// The release's notes (GitHub's Markdown) drawn as a page: titles, a rule under the big ones, bullets (nested by
+// their indent), bold lines brighter. What it does not know (tables, pictures) shows as its text.
+static void notes_draw(const char *md) {
+    const ImVec4 gold(1.0f, 0.85f, 0.3f, 1.0f);
+    char line[1024];
+    bool blank = false, first = true;
+
+    for (const char *p = md; *p != '\0';) {
+        const char *e = p;
+        size_t len, lead = 0;
+        while (*e != '\0' && *e != '\n') {
+            e++;
+        }
+        len = (size_t)(e - p);
+        while (len > 0 && (p[len - 1] == '\r' || p[len - 1] == ' ')) {
+            len--;
+        }
+        while (lead < len && p[lead] == ' ') {
+            lead++;
+        }
+        const char *t = p + lead;
+        size_t tl = len - lead;
+        p = *e != '\0' ? e + 1 : e;
+
+        if (tl == 0) {
+            blank = true;
+            continue;
+        }
+        if (tl >= 18 && SDL_strncmp(t, "**Full Changelog**", 18) == 0) { // (GitHub's own last line: an address)
+            continue;
+        }
+        if (blank && !first) {
+            ImGui::Spacing();
+        }
+        blank = false;
+        size_t rule = 0;
+        while (rule < tl && (t[rule] == '-' || t[rule] == '*' || t[rule] == '_')) {
+            rule++;
+        }
+        if (tl >= 3 && rule == tl) {
+            ImGui::Separator();
+        } else if (t[0] == '#') {
+            size_t level = 0;
+            while (level < tl && t[level] == '#') {
+                level++;
+            }
+            while (level < tl && t[level] == ' ') {
+                t++;
+                tl--;
+            }
+            notes_plain(t + level, tl - level, line, sizeof(line));
+            if (!first) {
+                ImGui::Spacing();
+            }
+            ImGui::SetWindowFontScale(level <= 1 ? 1.35f : level == 2 ? 1.18f : 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, gold);
+            ImGui::TextWrapped("%s", line);
+            ImGui::PopStyleColor();
+            ImGui::SetWindowFontScale(1.0f);
+            if (level <= 2) {
+                ImGui::Separator();
+            }
+        } else if (tl >= 2 && (t[0] == '*' || t[0] == '-' || t[0] == '+') && t[1] == ' ') {
+            float indent = U(8.0f) + (float)(lead / 2) * U(16.0f);
+            ImGui::Indent(indent);
+            ImGui::Bullet();
+            ImGui::SameLine();
+            notes_text(t + 2, tl - 2, line, sizeof(line));
+            ImGui::Unindent(indent);
+        } else {
+            notes_text(t, tl, line, sizeof(line));
+        }
+        first = false;
+    }
+}
+
+// The top of the settings window: what there is to update, the buttons, and the release's notes (open from the
+// start: "What's new" hides them).
 static void update_panel(void) {
     UpdateStatus u;
     const char *ver;
+    char line[320];
     int last = Update_LastResult(&ver);
     const ImVec4 gold(1.0f, 0.85f, 0.3f, 1.0f), red(1.0f, 0.55f, 0.35f, 1.0f), green(0.45f, 0.85f, 0.5f, 1.0f);
 
     Update_Status(&u);
     if (last > 0 && u.state < UPD_AVAILABLE) {
-        ImGui::TextColored(green, "Updated to %s.", ver);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPDATE_DONE, "Updated to {version}.", ver, 0);
+        ImGui::TextColored(green, "%s", line);
         ImGui::Separator();
     }
     if (u.state < UPD_AVAILABLE) {
@@ -1651,26 +1838,37 @@ static void update_panel(void) {
     }
     // the line that says where it stands
     if (u.state == UPD_AVAILABLE) {
-        ImGui::TextColored(gold, "Update %s available (this is %s).", u.latest, u.current);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_AVAILABLE, "Update {version} available.", u.latest, 0);
+        ImGui::SetWindowFontScale(1.18f);
+        ImGui::TextColored(gold, "%s", line);
+        ImGui::SetWindowFontScale(1.0f);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_CURRENT, "Installed: {version}", u.current, 0);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", line);
     } else if (u.state == UPD_DOWNLOADING) {
-        ImGui::TextColored(gold, "Downloading %s: %d%% (%.1f of %.1f MB). You can go on playing.", u.latest, upd_percent(u), (double)u.got / 1e6,
-                           (double)u.total / 1e6);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_DOWNLOADING, "Downloading {version}: {percent}%. You can go on playing.", u.latest,
+                 upd_percent(u));
+        ImGui::TextColored(gold, "%s (%.1f / %.1f MB)", line, (double)u.got / 1e6, (double)u.total / 1e6);
         ImGui::ProgressBar((float)upd_percent(u) / 100.0f, ImVec2(-1.0f, 0.0f), "");
     } else if (u.state == UPD_VERIFYING) {
-        ImGui::TextColored(gold, "Checking the download of %s (its signature)...", u.latest);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_CHECKING, "Checking the download of {version}...", u.latest, 0);
+        ImGui::TextColored(gold, "%s", line);
         ImGui::ProgressBar(1.0f, ImVec2(-1.0f, 0.0f), "");
     } else if (u.state == UPD_READY) {
-        ImGui::TextColored(green, "Update %s is downloaded and verified.", u.latest);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_READY, "Update {version} is downloaded and verified.", u.latest, 0);
+        ImGui::TextColored(green, "%s", line);
     } else if (u.state == UPD_INSTALLING || u.state == UPD_INSTALLED) {
-        ImGui::TextColored(gold, "Installing %s...", u.latest);
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_INSTALLING, "Installing {version}...", u.latest, 0);
+        ImGui::TextColored(gold, "%s", line);
     } else if (u.state == UPD_FAILED) {
+        upd_fill(line, sizeof(line), PORT_TEXT_UPD_P_FAILED, "The update to {version} was not installed:", u.latest, 0);
         ImGui::PushStyleColor(ImGuiCol_Text, red);
-        ImGui::TextWrapped("The update to %s was not installed: %s", u.latest, u.why);
+        ImGui::TextWrapped("%s %s", line, u.why);
         ImGui::PopStyleColor();
     }
     // the buttons
     if (u.state == UPD_AVAILABLE && u.canInstall) {
-        if (ImGui::Button("Update now")) {
+        if (upd_button(PORT_TEXT_UPD_B_NOW, "Update now", "updnow")) {
             Update_Download();
         }
         ImGui::SetItemTooltip("Downloads the new version in the background and checks its signature; you go on playing\n"
@@ -1678,7 +1876,7 @@ static void update_panel(void) {
                               "Your saves, settings, game data, mods and texture packs are not touched.");
         ImGui::SameLine();
         if (!sUpdLater) {
-            if (ImGui::Button("Later")) {
+            if (upd_button(PORT_TEXT_UPD_B_LATER, "Later", "updlater")) {
                 sUpdLater = true;
             }
             ImGui::SetItemTooltip("No reminder over the menus until the next start.");
@@ -1689,7 +1887,7 @@ static void update_panel(void) {
         if (busy) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Button("Restart now")) {
+        if (upd_button(PORT_TEXT_UPD_B_RESTART, "Restart now", "updrestart")) {
             upd_restart();
         }
         if (busy) {
@@ -1700,16 +1898,16 @@ static void update_panel(void) {
                                      "goes wrong, every file is put back). Your saves and settings are not touched.");
         ImGui::SameLine();
     } else if (u.state == UPD_FAILED && u.canInstall) {
-        if (ImGui::Button("Try again")) {
+        if (upd_button(PORT_TEXT_UPD_B_RETRY, "Try again", "updretry")) {
             Update_Download();
         }
         ImGui::SameLine();
     }
-    if (ImGui::Button(sUpdNotes ? "Hide what's new" : "What's new")) {
+    if (upd_button(sUpdNotes ? PORT_TEXT_UPD_B_NOTES_HIDE : PORT_TEXT_UPD_B_NOTES, sUpdNotes ? "Hide what's new" : "What's new", "updnotes")) {
         sUpdNotes = !sUpdNotes;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Release page")) {
+    if (upd_button(PORT_TEXT_UPD_B_PAGE, "Release page", "updpage")) {
         SDL_OpenURL(u.page);
     }
     ImGui::SetItemTooltip("Opens the release page in your browser. To update by hand, copy the new files over the old ones.");
@@ -1730,8 +1928,13 @@ static void update_panel(void) {
     }
     if (sUpdNotes) {
         const char *notes = Update_Notes();
-        ImGui::BeginChild("notes", ImVec2(0.0f, U(180.0f)), ImGuiChildFlags_Borders);
-        ImGui::TextWrapped("%s", notes[0] != '\0' ? notes : "(The release has no notes.)");
+        float room = ImGui::GetContentRegionAvail().y * 0.55f;
+        ImGui::BeginChild("notes", ImVec2(0.0f, room > U(220.0f) ? room : U(220.0f)), ImGuiChildFlags_Borders);
+        if (notes[0] != '\0') {
+            notes_draw(notes);
+        } else {
+            ImGui::TextDisabled("%s", upd_text(PORT_TEXT_UPD_NOTES_NONE, "(The release has no notes.)"));
+        }
         ImGui::EndChild();
     }
     ImGui::Separator();

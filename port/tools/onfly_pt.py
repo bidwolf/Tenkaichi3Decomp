@@ -35,6 +35,23 @@ PT = {
     "Updated to {version}.": "Atualizado para {version}.",
     "An update is being installed: online play is off until the game restarts (F1 > Restart now).":
         "Uma atualização está sendo instalada: o online fica desligado até o jogo reiniciar (F1 > Reiniciar agora).",
+    # the update's part of the settings window
+    "Update {version} available.": "Atualização {version} disponível.",
+    "Installed: {version}": "Instalada: {version}",
+    "Downloading {version}: {percent}%. You can go on playing.": "Baixando a {version}: {percent}%. Pode continuar jogando.",
+    "Checking the download of {version}...": "Conferindo o download da {version}...",
+    "Update {version} is downloaded and verified.": "Atualização {version} baixada e conferida.",
+    "Installing {version}...": "Instalando a {version}...",
+    "The update to {version} was not installed:": "A atualização {version} não foi instalada:",
+    "Update now": "Atualizar agora",
+    "Later": "Depois",
+    "Restart now": "Reiniciar agora",
+    "Try again": "Tentar de novo",
+    "What's new": "Novidades",
+    "Hide what's new": "Esconder novidades",
+    "Release page": "Página da versão",
+    "(The release has no notes.)": "(Esta versão não tem notas.)",
+    "Finish the online session first.": "Termine a sessão online primeiro.",
     # the main list
     "Quick Match": "Reserva Expressa", "Ranked Match": "Luta Ranqueada", "Lobby": "Sala de Embarque", "Join": "Check-in",
     "LAN Match": "Voo Doméstico", "Friends": "Colegas", "Tournament": "Rinha", "Replays": "Comprovantes",
