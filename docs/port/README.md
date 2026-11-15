@@ -5054,3 +5054,40 @@ window's picture (`BT3_UI_SHOT`); the catalog copy replaced and stamped.
 Not checked: `port/tests/update/run.sh` (it finds no SDL3 for the system's compiler on this Mac; the files it
 tests were not changed), a download and an install with the fork's key (the stand-in had no archive), the signing step of the
 workflow, Windows and Linux.
+
+## The ranking: ratings, tiers, achievements (2026-11-15)
+
+Asked by the user: a ranking that tells who is better and who is worse, with tiers and with achievements that mean
+something in the game (most damage, fastest, winning with "worse" fighters). Until now the service only counted
+tournaments' titles, wins and losses.
+
+- **Each player's game tells the service its match** (`match_post`, net_lobby.c; `POST /v1/match`), when its battle
+  ends, in a versus match and in a tournament's alike: the two names, the winner, the fighters of each side and
+  their cost (the menu's DP, `ChrTbl_GetCost`, summed over a team), how long the fight took (from the fight seen on
+  to seen decided), the health each side had left (all its fighters together, in hundredths), and the biggest combo
+  each side dealt (its damage and its hits, the HUD's own counters: `BtlSide_GetComboDamage` / `GetComboHits`,
+  watched while the fight is on by `stats_watch`). `Port_BattleStats` (headless.c) reads them; nothing is written
+  to the game. No packet of the lobby changed: a game of 0.1.40.1 plays with this one and tells nothing.
+  `BT3_NO_RESULT=1` sends nothing (the report is still in the log).
+- **The service** (`port/matchmaking/supabase/index.ts`, the table `bt3.matches`) joins the two reports of a match
+  by its key and number: told alike they are one match, with the smaller of each side's combo and of the time (a
+  copy can see a combo that a late input took back); told with different winners the match does not count; told
+  by one game only (the other is an older release) it counts. 120 matches an hour from one address. Anyone who
+  knows the address can post: among friends that is the whole protection, as for tournaments.
+- **What is worked out** (`ranking.ts`, with no database in it; `node port/matchmaking/supabase/ranking_test.mjs`):
+  an Elo rating from 1000 (K 40 for a player's first ten matches, 24 after); a tier by rating once a player has
+  five matches (Lista de Espera before; Econômica, Econômica Premium at 960, Executiva at 1040, Primeira Classe at
+  1120, Jatinho Particular at 1200); eleven achievements (a win in under 45 s, without losing health, with a tenth
+  of the health or less, with a team that costs less than the rival's, 3 DP or more below it, a combo of a whole
+  bar, five and ten wins in a row, wins with ten fighters, fifty matches, a tournament won); records (fastest win,
+  biggest combo, most hits, biggest upset, longest run); squads against each other; how often each fighter is
+  picked and wins. A player is a name without its squad's tag, whatever its capitals.
+- **The page** is `<service>/ranking` (and `/ranking.json`); the fighters' names on it are `fighters.ts`, made from
+  the menus' table by `port/tools/fighters_ts.py`. Tenkaichi Budokai Online's Leaderboard entry opens it in the
+  browser (`Port_RankingOpen`); it said "coming soon".
+- `/v1/result` takes a bracket of sixteen (it refused more than eight entrants).
+
+Checked: the arithmetic on made-up matches (the test above); the page of those matches, looked at; two copies on
+one Mac playing a versus match by address: both reports the same, field for field (winner, 57 s, health 39 / 0,
+combos 3260 and 1820, costs 5 and 4). Not checked: a team battle's numbers, the Leaderboard entry pressed, Windows
+and Linux, and whether a combo's damage is ever told differently by the two games (the service takes the smaller).

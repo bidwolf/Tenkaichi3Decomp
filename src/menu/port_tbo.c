@@ -243,6 +243,7 @@ extern s32 sceGsSyncPath(s32 mode, u16 timeout);
 extern void Port_NetOptions(int rollback, int delay);
 extern void Port_NetRulesSet(int type, int dp, int time);
 extern const char *Port_NetNameGet(void);
+extern int Port_RankingOpen(void); /* port/src/gs/net_match.c: the ranking's page in the browser */
 extern void Port_NetNameSave(const char *name);
 extern int Port_LobbyStartCode(int host, const char *code);
 extern const char *Port_NetLanAddress(void);                        /* this PC's address on its own network, "" not known */
@@ -447,7 +448,7 @@ static char *sTbHubSay[HUB_COUNT] = {
     "Your rivals, who is online, and invites. That one is coming soon!",
     "The Tenkaichi Budokai itself: brackets of 4 to 16 players. That one is coming soon!",
     "Your last matches, saved to watch again. That one is coming soon!",
-    "The strongest in the world, among your friends, and with each fighter. Coming soon!",
+    "Ratings, tiers, records and achievements from every lobby match. It opens in your browser!",
     "The name your rivals see.",
 };
 static void Tb_LobbyOpen(void);
@@ -991,6 +992,15 @@ static void Tb_HubUpdate(s32 live) {
             Snd_PlaySe(1, 1);
             sTb->prCur = 0;
             Tb_SetMode(TB_PROFILE);
+            break;
+        case HUB_LEADERBOARD: /* (the service's page: ratings, tiers, records, achievements) */
+            if (Port_RankingOpen()) {
+                Snd_PlaySe(1, 1);
+                Tb_Note("THE RANKING OPENED IN YOUR BROWSER");
+            } else {
+                Snd_PlaySe(1, 2);
+                Tb_Note("THE RANKING'S PAGE COULD NOT BE OPENED");
+            }
             break;
         default:
             Snd_PlaySe(1, 2);

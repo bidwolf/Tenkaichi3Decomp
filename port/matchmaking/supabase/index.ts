@@ -9,9 +9,10 @@
 //     variables and secrets
 //
 // The fork's own routes, answered here and not by the Worker: GET /squads (the groups and their squads, a line each,
-// tab-separated), POST /v1/result (a finished tournament, from its owner's game), GET /ranking (a page) and
-// /ranking.json. Anyone who knows the address can post a result: the limits are its shape and thirty an hour from
-// one address.
+// tab-separated), POST /v1/result (a finished tournament, from its owner's game), POST /v1/match (a finished match
+// with its numbers, from each of its two players' games), GET /ranking (a page) and /ranking.json (ranking.ts works
+// both out). Anyone who knows the address can post either: the limits are their shape, thirty tournaments and 120
+// matches an hour from one address, and that a match its two players tell differently does not count.
 //
 // What is not there: request.cf (where a request came from), so a quick match pairs by waiting time alone, and
 // the timer that measures the relay's use (the Worker's `scheduled`). Room codes, lobbies and spectators need
@@ -24,6 +25,7 @@
 // The game: BT3_MATCH_URL=https://<project>.supabase.co/functions/v1/<name>
 import postgres from "npm:postgres@3.4.5";
 import worker from "../worker.js";
+import { compute, page } from "./ranking.ts";
 
 // SQLite to Postgres, for the statements the Worker has: `?` to $1.., the tables in their schema (bt3), and the
 // counter's own column named with its table (Postgres does not know which `n` is meant in ON CONFLICT ... SET n =
@@ -56,34 +58,21 @@ const env = new Proxy({ DB: { prepare: (text: string) => statement(text, []) } }
     get: (own, name: string) => (name in own ? own[name] : Deno.env.get(name)),
 });
 
-// ---- the fork's own: squads, a tournament's result, the ranking (tables bt3.groups, bt3.squads, bt3.results) ----
+// ---- the fork's own: squads, a tournament's result, a match, the ranking (bt3.groups, .squads, .results, .matches) ----
 const clean = (v: unknown, max: number) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, max);
 const tagOf = (name: string) => (/^\[([A-Z0-9]{1,4})\] /.exec(name) ?? ["", ""])[1];
-const esc = (v: string) => v.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
+// The rows the ranking is worked out of (ranking.ts): the matches both players' games told alike (or one told and
+// the other never did), oldest first, and the tournaments' champions.
 async function ranking() {
-    const rows = await sql`SELECT champion, champion_tag, matches FROM bt3.results ORDER BY id DESC LIMIT 500`;
-    const players = new Map<string, { name: string; titles: number; wins: number; losses: number }>();
-    const squads = new Map<string, { tag: string; titles: number; wins: number; losses: number }>();
-    const player = (n: string) => players.get(n) ?? players.set(n, { name: n, titles: 0, wins: 0, losses: 0 }).get(n)!;
-    const squad = (t: string) => squads.get(t) ?? squads.set(t, { tag: t, titles: 0, wins: 0, losses: 0 }).get(t)!;
-    for (const r of rows) {
-        player(r.champion).titles++;
-        if (r.champion_tag) squad(r.champion_tag).titles++;
-        for (const m of Array.isArray(r.matches) ? r.matches : []) {
-            const w = clean(m.w, 20), l = clean(m.w === m.a ? m.b : m.a, 20);
-            if (!w || !l) continue;
-            player(w).wins++;
-            player(l).losses++;
-            if (tagOf(w) && tagOf(l) && tagOf(w) !== tagOf(l)) { // (a squad's score: its wins over other squads)
-                squad(tagOf(w)).wins++;
-                squad(tagOf(l)).losses++;
-            }
-        }
-    }
-    const order = <T extends { titles: number; wins: number; losses: number }>(m: Map<string, T>) =>
-        [...m.values()].sort((x, y) => y.titles - x.titles || y.wins - x.wins || x.losses - y.losses);
-    return { tournaments: rows.length, players: order(players), squads: order(squads) };
+    const rows = await sql`SELECT id, made, a, b, w, tour, secs, hp_a, hp_b, combo_a, combo_b, hits_a, hits_b, cost_a, cost_b, chars_a, chars_b
+                           FROM bt3.matches WHERE ok ORDER BY id DESC LIMIT 5000`;
+    const titles = await sql`SELECT champion, made FROM bt3.results ORDER BY id DESC LIMIT 1000`;
+    const ints = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter(Number.isInteger) : []);
+    return compute(rows.map((r) => ({
+        id: r.id, made: r.made, a: r.a, b: r.b, w: r.w, tour: r.tour, secs: r.secs, hp: [r.hp_a, r.hp_b], combo: [r.combo_a, r.combo_b],
+        hits: [r.hits_a, r.hits_b], cost: [r.cost_a, r.cost_b], chars: [ints(r.chars_a), ints(r.chars_b)],
+    })), titles.map((t) => ({ champion: t.champion, made: t.made })));
 }
 
 async function own(request: Request, path: string): Promise<Response | null> {
@@ -97,9 +86,9 @@ async function own(request: Request, path: string): Promise<Response | null> {
         const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim(), now = Math.floor(Date.now() / 1000);
         let body: Record<string, unknown>;
         try { body = JSON.parse(raw); } catch { return Response.json({ error: "bad request" }, { status: 400 }); }
-        const matches = Array.isArray(body.matches) ? body.matches.slice(0, 7).map((m) => ({ a: clean(m?.a, 20), b: clean(m?.b, 20), w: clean(m?.w, 20) })) : [];
+        const matches = Array.isArray(body.matches) ? body.matches.slice(0, 15).map((m) => ({ a: clean(m?.a, 20), b: clean(m?.b, 20), w: clean(m?.w, 20) })) : [];
         const champion = clean(body.champion, 20), entrants = Number(body.entrants);
-        if (raw.length > 4096 || !champion || !Number.isInteger(entrants) || entrants < 2 || entrants > 8 || matches.length < 1 ||
+        if (raw.length > 4096 || !champion || !Number.isInteger(entrants) || entrants < 2 || entrants > 16 || matches.length < 1 ||
             matches.some((m) => !m.a || !m.b || (m.w !== m.a && m.w !== m.b))) {
             return Response.json({ error: "bad request" }, { status: 400 });
         }
@@ -108,20 +97,45 @@ async function own(request: Request, path: string): Promise<Response | null> {
         await sql`INSERT INTO bt3.results (made, ip, grp, champion, champion_tag, entrants, matches) VALUES (${now}, ${ip}, ${clean(body.grp, 12)}, ${champion}, ${tagOf(champion)}, ${entrants}, ${sql.json(matches)})`;
         return Response.json({ ok: true });
     }
+    if (request.method === "POST" && path.endsWith("/v1/match")) { // a finished match, from each of its two players' games
+        const raw = await request.text();
+        const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim(), now = Math.floor(Date.now() / 1000);
+        let body: Record<string, unknown>;
+        try { body = JSON.parse(raw); } catch { return Response.json({ error: "bad request" }, { status: 400 }); }
+        const pair = (v: unknown, max: number) => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isInteger(x) && x >= 0 && x <= max) ? (v as number[]) : null);
+        const chars = (v: unknown) => (Array.isArray(v) && v.length >= 1 && v.length <= 5 && v.every((x) => Number.isInteger(x) && x >= 0 && x < 512) ? (v as number[]) : null);
+        const a = clean(body.a, 20), b = clean(body.b, 20), w = Number(body.w), me = Number(body.me), gen = Number(body.gen), secs = Number(body.secs);
+        const hp = pair(body.hp, 100), combo = pair(body.combo, 1000000), hits = pair(body.hits, 999), cost = pair(body.cost, 200), ca = chars(body.ca), cb = chars(body.cb);
+        if (raw.length > 1024 || !a || !b || a === b || (w !== 0 && w !== 1) || (me !== 0 && me !== 1) || !/^[0-9a-f]{8}$/.test(String(body.k)) ||
+            !Number.isInteger(gen) || gen < 1 || !Number.isInteger(secs) || secs < 0 || secs > 3600 || !hp || !combo || !hits || !cost || !ca || !cb) {
+            return Response.json({ error: "bad request" }, { status: 400 });
+        }
+        const [{ n }] = await sql`SELECT COUNT(*) AS n FROM bt3.matches WHERE ip = ${ip} AND made > ${now - 3600}`;
+        if (n >= 120) return Response.json({ error: "busy" }, { status: 429 }); // (one address: 120 matches an hour)
+        const key = `${body.k}:${gen}`, bit = 1 << me;
+        // The other player's report of the same match (two hours back): told alike, the two are one match, with the
+        // smaller of each side's combo and of the time (a copy can see a combo that a late input took back); told
+        // differently, the match does not count.
+        const [had] = await sql`SELECT id, w, reports FROM bt3.matches WHERE key = ${key} AND a = ${a} AND b = ${b} AND made > ${now - 7200} ORDER BY id DESC LIMIT 1`;
+        if (!had) {
+            await sql`INSERT INTO bt3.matches (made, ip, grp, key, a, b, w, tour, secs, hp_a, hp_b, combo_a, combo_b, hits_a, hits_b, cost_a, cost_b, chars_a, chars_b, reports)
+                      VALUES (${now}, ${ip}, ${clean(body.grp, 12)}, ${key}, ${a}, ${b}, ${w}, ${body.tour === 1 || body.tour === true}, ${secs}, ${hp[0]}, ${hp[1]}, ${combo[0]}, ${combo[1]},
+                              ${hits[0]}, ${hits[1]}, ${cost[0]}, ${cost[1]}, ${sql.json(ca)}, ${sql.json(cb)}, ${bit})`;
+        } else if ((had.reports & bit) === 0) {
+            if (had.w === w) {
+                await sql`UPDATE bt3.matches SET reports = reports | ${bit}, secs = LEAST(secs, ${secs}), combo_a = LEAST(combo_a, ${combo[0]}), combo_b = LEAST(combo_b, ${combo[1]}),
+                          hits_a = LEAST(hits_a, ${hits[0]}), hits_b = LEAST(hits_b, ${hits[1]}) WHERE id = ${had.id}`;
+            } else {
+                await sql`UPDATE bt3.matches SET reports = reports | ${bit}, ok = false WHERE id = ${had.id}`;
+            }
+        }
+        return Response.json({ ok: true });
+    }
     if (request.method === "GET" && path.endsWith("/ranking.json")) {
         return Response.json(await ranking());
     }
     if (request.method === "GET" && path.endsWith("/ranking")) {
-        const r = await ranking();
-        const table = (head: string, rows: string[][]) => `<table><tr>${["#", head, "Títulos", "Vitórias", "Derrotas"].map((h) => `<th>${h}</th>`).join("")}</tr>` +
-            rows.map((c, i) => `<tr><td>${i + 1}</td>${c.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("") + "</table>";
-        const html = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ranking da Rinha</title>
-<style>body{font-family:Poppins,system-ui,sans-serif;background:#002c56;color:#fff;margin:0;padding:24px 16px}main{max-width:720px;margin:auto}h1{margin:0 0 4px}h2{margin:28px 0 8px;color:#97ccfd;font-size:1rem;text-transform:uppercase}p{color:#97ccfd;margin:0}
-table{width:100%;border-collapse:collapse;background:#001e3c;border-radius:14px;overflow:hidden}th,td{padding:10px 12px;text-align:left}th{background:#0062ab;font-size:.8rem}td:nth-child(n+3),th:nth-child(n+3){text-align:right}tr+tr td{border-top:1px solid #0b3a66}</style>
-<main><h1>Ranking da Rinha</h1><p>${r.tournaments} rinha${r.tournaments === 1 ? "" : "s"} registrada${r.tournaments === 1 ? "" : "s"}</p>
-<h2>Squads</h2>${table("Squad", r.squads.map((s) => [s.tag, String(s.titles), String(s.wins), String(s.losses)]))}
-<h2>Viajantes</h2>${table("Viajante", r.players.slice(0, 100).map((p) => [p.name, String(p.titles), String(p.wins), String(p.losses)]))}</main></html>`;
-        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+        return new Response(page(await ranking()), { headers: { "content-type": "text/html; charset=utf-8" } });
     }
     return null;
 }
