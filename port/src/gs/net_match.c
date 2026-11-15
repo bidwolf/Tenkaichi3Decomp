@@ -116,6 +116,13 @@ static const char *match_url(void) {
     return e != NULL && e[0] != '\0' ? e : MATCH_URL_DEFAULT;
 }
 
+/* Tenkaichi Budokai Online's Leaderboard (src/menu/port_tbo.c): the service's ranking page, in the browser. */
+int Port_RankingOpen(void) {
+    char url[400];
+    SDL_snprintf(url, sizeof(url), "%s/ranking", match_url());
+    return SDL_OpenURL(url);
+}
+
 /* For the port's other questions to the service (gs/squads.c). */
 const char *Match_Url(void) {
     return match_url();

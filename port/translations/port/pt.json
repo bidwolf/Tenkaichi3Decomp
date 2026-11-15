@@ -2,7 +2,7 @@
   "schema_version": 1,
   "labels_version": 1,
   "translation_version": 1,
-  "labels_count": 557,
+  "labels_count": 559,
   "locale": "pt",
   "name": "Português (Onfly)",
   "order": 2,
@@ -1072,9 +1072,9 @@
       "text": "Suas últimas lutas, guardadas como comprovante. Essa está em aprovação!",
       "note": "talk box at the foot of the screen (two lines at most), for the main list's entries"
     },
-    "tbo/cbebde6d": {
-      "original": "The strongest in the world, among your friends, and with each fighter. Coming soon!",
-      "text": "Os mais fortes do mundo, da sua squad e com cada lutador. Em aprovação!",
+    "tbo/4124ba9a": {
+      "original": "Ratings, tiers, records and achievements from every lobby match. It opens in your browser!",
+      "text": "Rating, classes, recordes e conquistas de toda luta em sala. Abre no seu navegador!",
       "note": "talk box at the foot of the screen (two lines at most), for the main list's entries"
     },
     "tbo/49ddf972": {
@@ -1340,6 +1340,16 @@
     "tbo/69760784": {
       "original": "Update available. Online servers are unreachable until you update.",
       "text": "Atualização disponível. O online fica fora do ar até você atualizar.",
+      "note": "in Tb_HubUpdate"
+    },
+    "tbo/5134ea99": {
+      "original": "THE RANKING OPENED IN YOUR BROWSER",
+      "text": "O RANKING ABRIU NO SEU NAVEGADOR",
+      "note": "in Tb_HubUpdate"
+    },
+    "tbo/34a9d3f5": {
+      "original": "THE RANKING'S PAGE COULD NOT BE OPENED",
+      "text": "NÃO FOI POSSÍVEL ABRIR A PÁGINA DO RANKING",
       "note": "in Tb_HubUpdate"
     },
     "tbo/36e2ae69": {

@@ -278,6 +278,42 @@ int Port_BattleOutcome(int *winner) {
     return gBtlSeq->state;
 }
 
+/* For the ranking (gs/net_lobby.c): the fight as it stands, both sides. Read only. */
+#include "gs/battle_stats.h"
+int Port_BattleStats(PortBattleStats *o) {
+    extern int BattleSide_GetMemberCount(int side), BattleSide_GetMemberChara(int side, int idx), BattleSide_GetObjId(int side);
+    extern int ChrTbl_GetCost(int chara), BtlCharApi_GetMemberHpPercent(int objId, int member), BtlCharApi_GetMemberCount(int objId);
+    extern int BtlSide_GetComboDamage(int side), BtlSide_GetComboHits(int side);
+    int s, i;
+
+    memset(o, 0, sizeof(*o));
+    o->state = gBtlSeq != NULL ? gBtlSeq->state : -1;
+    if (o->state < 3 || o->state > 6) {
+        return 0;
+    }
+    for (s = 0; s < 2; s++) {
+        int obj = BattleSide_GetObjId(s), n = BattleSide_GetMemberCount(s), live = BtlCharApi_GetMemberCount(obj), sum = 0;
+        if (n < 1 || n > BSTAT_TEAM || live < 1) {
+            return 0;
+        }
+        o->count[s] = n;
+        for (i = 0; i < n; i++) {
+            o->chara[s][i] = BattleSide_GetMemberChara(s, i);
+            if (o->chara[s][i] >= 0 && o->chara[s][i] < 512) {
+                o->cost[s] += ChrTbl_GetCost(o->chara[s][i]);
+            }
+            sum += i < live ? BtlCharApi_GetMemberHpPercent(obj, i) : 0;
+        }
+        o->hpPct[s] = sum / n;
+        if (o->state == 3) {
+            int dmg = BtlSide_GetComboDamage(s);
+            o->combo[s] = dmg > 0 ? dmg : 0;
+            o->hits[s] = dmg > 0 ? BtlSide_GetComboHits(s) : 0;
+        }
+    }
+    return 1;
+}
+
 /* Main-menu item 4, Dragon Net Battle, was confirmed (src/menu/menu_a.c): the settings code opens the online
    screen when it sees the request (port/src/gs/ui.cpp). Without a window nothing does. */
 volatile int gPortNetMenuRequest;

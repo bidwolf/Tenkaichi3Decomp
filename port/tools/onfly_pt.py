@@ -72,8 +72,10 @@ PT = {
         "A Rinha em pessoa: itinerários de 4 a 16 viajantes. Essa está em aprovação!",
     "Your last matches, saved to watch again. That one is coming soon!":
         "Suas últimas lutas, guardadas como comprovante. Essa está em aprovação!",
-    "The strongest in the world, among your friends, and with each fighter. Coming soon!":
-        "Os mais fortes do mundo, da sua squad e com cada lutador. Em aprovação!",
+    "Ratings, tiers, records and achievements from every lobby match. It opens in your browser!":
+        "Rating, classes, recordes e conquistas de toda luta em sala. Abre no seu navegador!",
+    "THE RANKING OPENED IN YOUR BROWSER": "O RANKING ABRIU NO SEU NAVEGADOR",
+    "THE RANKING'S PAGE COULD NOT BE OPENED": "NÃO FOI POSSÍVEL ABRIR A PÁGINA DO RANKING",
     "The name your rivals see.": "O nome que seus rivais veem.",
     "AUTO": "AUTO", "NORTH AMERICA": "AMÉRICA DO NORTE", "SOUTH AMERICA": "AMÉRICA DO SUL", "EUROPE": "EUROPA",
     "MIDDLE EAST": "ORIENTE MÉDIO", "AFRICA": "ÁFRICA", "ASIA": "ÁSIA", "OCEANIA": "OCEANIA", "ANYWHERE": "QUALQUER LUGAR",

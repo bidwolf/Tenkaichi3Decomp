@@ -2709,6 +2709,95 @@ void Lobby_Stranger(const uint8_t *pkt, int n, const struct sockaddr_in *from, u
 static void do_cmd(const Cmd *c);
 static void join_found(const char addrs[][64], int count, const char *code, const char *self);
 
+/* ---- the ranking: what a match's player tells the service when its battle ends (POST /v1/match) ----
+   Each of the two players' games posts the match by itself (no packet of the lobby changed): who played, who won,
+   the fighters and their cost, how long the fight took, the health each side had left, and the biggest combo each
+   side dealt. The service joins the two reports by the match's key and number; a match the two tell differently
+   does not count. Watched while the fight is on (stats_watch, from result_watch). BT3_NO_RESULT=1: nothing is sent. */
+#include "battle_stats.h"
+static struct {
+    uint32_t gen;
+    uint64_t startNs, endNs;   /* the fight seen on, and seen decided */
+    int combo[2], hits[2];     /* the biggest combo each side dealt: its damage, its hits */
+    PortBattleStats last;      /* the fight as last seen */
+    int have;
+} sSt;
+
+static void stats_watch(uint32_t gen, uint64_t now) {
+    PortBattleStats b;
+    int s;
+    if (gen != sSt.gen) {
+        memset(&sSt, 0, sizeof(sSt));
+        sSt.gen = gen;
+    }
+    if (!Port_BattleStats(&b)) {
+        return;
+    }
+    if (b.state == 3) {
+        if (sSt.startNs == 0) {
+            sSt.startNs = now;
+        }
+        if (sSt.endNs != 0) { /* (an end that a late input took back) */
+            sSt.endNs = 0;
+        }
+        for (s = 0; s < 2; s++) {
+            if (b.combo[s] > sSt.combo[s]) {
+                sSt.combo[s] = b.combo[s];
+            }
+            if (b.hits[s] > sSt.hits[s]) {
+                sSt.hits[s] = b.hits[s];
+            }
+        }
+    } else if (sSt.startNs != 0 && sSt.endNs == 0) {
+        sSt.endNs = now;
+    }
+    sSt.last = b;
+    sSt.have = 1;
+}
+
+static int SDLCALL match_thread(void *json) {
+    char out[256] = "";
+    int ok = Match_Post("match", (const char *)json, out, sizeof(out));
+    fprintf(stderr, "bt3: lobby: the match %s\n", ok && strstr(out, "\"ok\"") != NULL ? "was sent for the ranking" : "could not be sent for the ranking");
+    SDL_free(json);
+    return 0;
+}
+
+static void match_post(uint32_t gen, int res) {
+    extern const char *PortSquad_MyGroupId(void); /* gs/squads.c */
+    LMatch *x = match_by_gen(gen);
+    char *json, a[48], b[48];
+    int n, s, i;
+    SDL_Thread *t;
+
+    if ((res != RES_SIDE0 && res != RES_SIDE1) || (sL.myRole != 1 && sL.myRole != 2) || x == NULL || !sSt.have || sSt.gen != gen ||
+        sSt.startNs == 0 || (json = (char *)SDL_malloc(1024)) == NULL) {
+        return;
+    }
+    json_name(a, sizeof(a), name_of(x->id[0]));
+    json_name(b, sizeof(b), name_of(x->id[1]));
+    n = SDL_snprintf(json, 1024, "{\"grp\":\"%s\",\"k\":\"%08x\",\"gen\":%u,\"tour\":%d,\"me\":%d,\"a\":\"%s\",\"b\":\"%s\",\"w\":%d,\"secs\":%d,"
+                                 "\"hp\":[%d,%d],\"combo\":[%d,%d],\"hits\":[%d,%d],\"cost\":[%d,%d]",
+                     PortSquad_MyGroupId(), (unsigned)sL.matchKey, (unsigned)gen, x->tm >= 0, sL.myRole - 1, a, b, res == RES_SIDE0 ? 0 : 1,
+                     (int)(((sSt.endNs != 0 ? sSt.endNs : now_ns()) - sSt.startNs) / SEC), sSt.last.hpPct[0], sSt.last.hpPct[1], sSt.combo[0],
+                     sSt.combo[1], sSt.hits[0], sSt.hits[1], sSt.last.cost[0], sSt.last.cost[1]);
+    for (s = 0; s < 2; s++) {
+        n += SDL_snprintf(json + n, 1024 - (size_t)n, ",\"c%c\":[", 'a' + s);
+        for (i = 0; i < sSt.last.count[s]; i++) {
+            n += SDL_snprintf(json + n, 1024 - (size_t)n, "%s%d", i ? "," : "", sSt.last.chara[s][i]);
+        }
+        n += SDL_snprintf(json + n, 1024 - (size_t)n, "]");
+    }
+    SDL_snprintf(json + n, 1024 - (size_t)n, "}");
+    fprintf(stderr, "bt3: lobby: match %u for the ranking: %s\n", (unsigned)gen, json);
+    t = getenv("BT3_NO_RESULT") == NULL ? SDL_CreateThread(match_thread, "bt3-match", json) : NULL; /* (tests: only the log's line) */
+    if (t != NULL) {
+        SDL_DetachThread(t);
+    } else {
+        SDL_free(json);
+    }
+}
+
 /* In a match (match `gen`): how its first battle ended, as this copy sees it. The fight has to have been seen on (a
    battle left over from before is not this match's), and its end held for 0.3 s (longer than any rollback: an end
    that a late input takes back is not taken). Kept until the next match; a member says it with each ALIVE. */
@@ -2725,6 +2814,7 @@ static void result_watch(uint32_t gen) {
         sL.resSawFight = 0;
         sL.resCand = RES_NONE;
     }
+    stats_watch(gen, now);
     if (sL.res != RES_NONE) {
         return;
     }
@@ -2753,6 +2843,7 @@ static void result_watch(uint32_t gen) {
         if (sL.on == 2) {
             alive_send(); /* (the owner hears it at once) */
         }
+        match_post(gen, res);
     }
 }
 
